@@ -4,8 +4,11 @@ This project ports the Windows tool's supported Linux workflow to Linux x86-64. 
 
 The binary rules in `mv2ctl.py` currently have independently validated ELF profiles:
 
-- Arch Chromium 154.0.8037.97, including the impact-checker/startup sites and the Linux-specific disable-reason and `UserMayLoad` helpers.
-- Chrome for testing 155.0.8059.79, 156.0.8078.12 and 157.0.8102.0. The 156 Beta build includes both the original `UserMayInstall` gate and a second helper; both are counted and their allow targets are checked before patching. Canary 157 has only the second helper.
+- Arch Chromium 154.0.8037.97 and Chromium 155.0.8059.79 with the same ELF layout, including the impact-checker/startup sites and Linux-specific disable-reason and `UserMayLoad` helpers. The 155 distro build has alternate compiler shapes for two sites; both targets are validated.
+- Chrome for testing 155.0.8059.79, 156.0.8078.12 and 157.0.8102.0. The 155/156 layouts include the `UserMayInstall` gate; Canary 157 does not. All three profiles validate the scalar `IsExtensionAffected` path and recognize the content-hash helper as read-only.
+- Chromium 158.0.8105.0 centralizes the MV2 impact decision in two `manifest_v2_util::IsExtensionAffected` overloads. Both the extension-object and scalar paths are counted, and their safe return destinations are validated. The profile also preserves the signed-resource hash filter.
+
+`ContentHash::ShouldComputeHashesForResource` is never patched: for signed hashes it intentionally selects only resources with a signed tree-hash root. If an older patch changed this gate, analysis rejects the binary; restore from its verified `.mv2orig` and apply the current patcher again.
 
 Each profile has its own expected site counts and checks branch destinations before editing. Unknown or mixed layouts fail closed. Other builds, including later Canary versions, are not automatically assumed compatible; run `analyze` after each browser update and add a profile only after validating its control flow.
 

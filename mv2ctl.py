@@ -47,12 +47,12 @@ BACKUP_SUFFIX = ".mv2orig"
 EXPECT = {"A": 4, "B": 1, "C": 1, "D": 1, "S": 1, "U": 1}
 EXPECT_PROFILES = {
     "Chromium 154-compatible ELF layout": EXPECT,
-    "Google Chrome 155 / 157 Canary ELF layout": {"A": 2, "B": 0, "C": 0, "D": 1, "S": 1, "U": 1,
-                                                    "M": 1, "I": 1, "V": 1},
-    "Chrome 155 alternate / 156 Beta ELF layout": {"A": 2, "B": 0, "C": 0, "D": 1, "S": 1, "U": 2,
-                                                    "M": 1, "I": 1, "V": 1},
+    "Google Chrome 155 / 156 Beta ELF layout": {"A": 2, "B": 0, "C": 0, "D": 1, "S": 1, "U": 1,
+                                                 "M": 1, "I": 1, "V": 1, "H": 1},
+    "Google Chrome 157 Canary ELF layout": {"A": 2, "B": 0, "C": 0, "D": 1, "S": 1, "U": 0,
+                                             "M": 1, "I": 1, "V": 1, "H": 1},
     "Chromium 158 centralized MV2 policy ELF": {"A": 0, "B": 0, "C": 0, "D": 0, "S": 0,
-                                                 "U": 1, "M": 0, "I": 0, "V": 2},
+                                                 "U": 0, "M": 0, "I": 0, "V": 2, "H": 1},
 }
 
 # ------------------------------------------------------------------ regex-блоки
@@ -170,10 +170,10 @@ R155_U = re.compile(
     rb"\x83\x7f\x50\x02(?P<j>[\x7f\xeb].)"
     rb"\x41\x80\xbc\x24\x08\x02\x00\x00\x00\x0f\x85...."
     rb"\x49\x8b\x84\x24\x28\x02\x00\x00\x83\xb8\x88\x00\x00\x00\x06", F)
-# Later Chromium builds contain an additional MV2-specific boolean helper.
-# Non-MV2 manifests return true immediately; manifest v2 enters a secondary
-# check. The short branch target is the verified `return true` block.
-R156_157_U = re.compile(
+# ContentHash::ShouldComputeHashesForResource. This is a source-type check, not
+# an MV2 manifest-version gate. Keep it recognized as read-only so legacy
+# patched binaries can be rejected and restored instead of silently accepted.
+RHASH = re.compile(
     rb"\x55\x48\x89\xe5\x83\x7f\x50\x02(?P<j>\x75\x0a|\xeb\x0a)"
     rb"\x48\x8b\x7f\x60\x5d\xe9....\xb0\x01\x5d\xc3", F)
 # Chromium 158 centralizes the MV2 impact decision in two overloads of
@@ -434,22 +434,23 @@ def find_sites(mm, segs):
         for m in R155_U.finditer(mm, seg.off, seg.off + seg.filesz):
             short_branch_site("U", seg, m, b"\x48\x8d\x1d", "UserMayInstall normal policy path")
 
-        for m in R156_157_U.finditer(mm, seg.off, seg.off + seg.filesz):
+        for m in RHASH.finditer(mm, seg.off, seg.off + seg.filesz):
             jpos = m.start("j")
             target = target_for(seg, jpos)
             if target is None or bytes(mm[target:target + 4]) != b"\xb0\x01\x5d\xc3":
-                rejects.append(("U", m.start(), "Beta/Canary UserMayInstall allow-return target did not validate"))
+                rejects.append(("H", m.start(), "ContentHash return-true target did not validate"))
                 continue
             cur = bytes(mm[jpos:jpos + 2])
             if cur == b"\x75\x0a":
-                state = "original"
+                state = "ignored"
             elif cur == b"\xeb\x0a":
-                state = "patched"
-            else:
-                rejects.append(("U", m.start(), "unknown Beta/Canary UserMayInstall branch bytes"))
+                rejects.append(("H", m.start(), "ContentHash gate was changed by an older patch; restore the original binary"))
                 continue
-            sites.append(Site("U", m.start(), m.end(), jpos, b"\x75\x0a", b"\xeb\x0a", state,
-                              f"bypass MV2-specific helper -> vaddr 0x{vaddr_of(segs, target) or 0:X}"))
+            else:
+                rejects.append(("H", m.start(), "unknown ContentHash branch bytes"))
+                continue
+            sites.append(Site("H", m.start(), m.end(), jpos, cur, cur, state,
+                              f"preserve signed-resource hash filter -> vaddr 0x{vaddr_of(segs, target) or 0:X}"))
 
         for m in R158_V1.finditer(mm, seg.off, seg.off + seg.filesz):
             jpos = m.start("j")
@@ -599,7 +600,7 @@ def analyze(path, verbose=True, with_discovery=True):
         profiles = [name for name, expected in EXPECT_PROFILES.items()
                     if counts == {k: expected.get(k, 0) for k in kinds}]
         ok_counts = len(profiles) == 1
-        states = {s.state for s in sites}
+        states = {s.state for s in sites if s.state != "ignored"}
         if verbose:
             print(f"binary : {path}")
             print(f"size   : {os.path.getsize(path)}")
@@ -722,7 +723,7 @@ def cmd_apply(path, assume_yes):
         raise SystemExit("\nУже пропатчено. Ничего не делаю.")
     if os.geteuid() != 0 and not os.access(os.path.dirname(path), os.W_OK):
         raise SystemExit("\nНужны права на запись в каталог бинарника: запустите через sudo.")
-    pending = [site for site in sites if site.state == "original"]
+    pending = [site for site in sites if site.state == "original" and site.orig != site.new]
     if not pending:
         raise SystemExit("Нет исходных байт для изменения.")
     print(f"\nБудет изменено мест: {len(pending)} (из {len(sites)} проверенных).")
