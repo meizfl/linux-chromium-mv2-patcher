@@ -46,7 +46,7 @@ AUTO_PATHS = [
 BACKUP_SUFFIX = ".mv2orig"
 EXPECT = {"A": 4, "B": 1, "C": 1, "D": 1, "S": 1, "U": 1}
 EXPECT_PROFILES = {
-    "Chromium 154 ELF": EXPECT,
+    "Chromium 154-compatible ELF layout": EXPECT,
     "Google Chrome 155+ ELF layout": {"A": 2, "B": 0, "C": 0, "D": 1, "S": 1, "U": 1,
                                "M": 1, "I": 1},
     "Google Chrome 156 Beta / 157 Canary ELF": {"A": 2, "B": 0, "C": 0, "D": 1, "S": 1, "U": 2,
@@ -80,6 +80,16 @@ RC = re.compile(
     rb"\x31\xc0\x83[\xf8-\xff]\x08\x77.[\xb8-\xbf]\x0a\x01\x00\x00\x0f\xa3[\xc0-\xff]\x73." +
     rb"\x83[\xf8-\xff][\x05\x0a]\x0f\x95[\xc0-\xc7]\x83[\xf8-\xff][\x05\x0a]\x0f\x95[\xc0-\xc7]\x20[\xc0-\xff]", F)
 
+# Chromium 155 distro build: the compiler inserted a profile-state load before
+# the same JLE -> zero/clear path and kept a stack reload before the type bit
+# test's safe branch. Validate the whole function shape instead of widening RC.
+RC155 = re.compile(
+    HDR + rb"\x48\x8b\xb5\x98\xfd\xff\xff(?P<j>\x7e\x04|\x90\x90)\x31\xc0\xeb\x40"
+    + LOAD228 + LOADLOC + FLAGCHK + LOADTYP +
+    rb"\x31\xc0\x83\xfa\x08\x77.\xbe\x0a\x01\x00\x00\x0f\xa3\xd6"
+    rb"\x48\x8b\xb5\x98\xfd\xff\xff\x73."
+    rb"\x83\xf9\x05\x0f\x95\xc2\x83\xf9\x0a\x0f\x95\xc0\x20\xd0", F)
+
 # Стартовая ветка: cmp r,r ; je rel32 ; ... mov edi,4 ; call new ; ... mov dword [rax],0x800000
 S_NEEDLE = b"\xbf\x04\x00\x00\x00\x67\xe8"
 S_LEAD = 21
@@ -101,6 +111,16 @@ RD = re.compile(
     rb"\x8b\x86\x88\x00\x00\x00\x83\xf8\x08\x74."
     rb"\x83\xf8\x01\x0f\x85....\x8b\x46\x50"
     rb"\x83\xf8\x05\x74.\x83\xf8\x0a\x75.", F)
+
+# A later Chromium build retained the same disable-reason behavior but emitted
+# the entry and type checks with a different register allocation.
+RD_ALT = re.compile(
+    rb"\x83\x7e\x50\x02(?P<j>\x0f\x85....|\x90\xe9....)"
+    rb"\x49\x89\xf6\x80\xbe\x08\x02\x00\x00\x00\x0f\x85...."
+    rb"\x41\x89\xd7\x4c\x8b\x27\x49\x8b\xb6\x28\x02\x00\x00"
+    rb"\x8b\x86\x88\x00\x00\x00\x83\xf8\x08\x74."
+    rb"\x83\xf8\x01\x0f\x85....\x8b\x46\x50\x31\xdb"
+    rb"\x83\xf8\x05\x0f\x84....\x83\xf8\x0a\x0f\x84....", F)
 
 # UserMayLoad-style availability check. For manifest_version <= 2, JLE enters
 # the detailed location/type checks, which can return disabled. The fallthrough
@@ -248,33 +268,57 @@ def find_sites(mm, segs):
                     sites.append(make_site("B", mm, m, "j", b"\x0f\x8f", b"\x90\xe9", info))
                 else:
                     sites.append(make_site("C", mm, m, "j", b"\x7e\x04", b"\x90\x90", "xor eax,eax-путь"))
+    # Chromium 155 distro layout: same clear-result gate with two stack reloads.
+    for s in segs:
+        for m in RC155.finditer(mm, s.off, s.off + s.filesz):
+            jpos = m.start("j")
+            cur = bytes(mm[jpos:jpos + 2])
+            target = jpos + 6
+            safe_jump = decode_jump(mm, jpos + 4)
+            if (bytes(mm[jpos + 2:jpos + 4]) != b"\x31\xc0" or
+                    bytes(mm[jpos + 4:jpos + 6]) != b"\xeb\x40" or
+                    not (s.off <= target < s.off + s.filesz) or
+                    safe_jump is None or safe_jump[0] < s.off or safe_jump[0] + 6 > s.off + s.filesz or
+                    bytes(mm[safe_jump[0]:safe_jump[0] + 6]) != b"\x88\x86\x93\x03\x00\x00"):
+                rejects.append(("C", m.start(), "Chromium 155 clear-result path did not validate"))
+                continue
+            if cur == b"\x7e\x04":
+                state = "original"
+            elif cur == b"\x90\x90":
+                state = "patched"
+            else:
+                rejects.append(("C", m.start(), "unknown Chromium 155 JLE bytes"))
+                continue
+            sites.append(Site("C", m.start(), m.end(), jpos, b"\x7e\x04", b"\x90\x90", state,
+                              f"manifest gate -> verified zero-result path vaddr 0x{vaddr_of(segs, safe_jump[0]) or 0:X}"))
     # MV2-specific disable-reason helper, validated by its control-flow target
     # and by the 0x800000 reason-setting call on the fall-through path.
     for s in segs:
-        for m in RD.finditer(mm, s.off, s.off + s.filesz):
-            jpos = m.start("j")
-            decoded = decode_jump(mm, jpos)
-            if decoded is None:
-                rejects.append(("D", m.start(), "не удалось разобрать переход версии manifest"))
-                continue
-            target = decoded[0]
-            fallthrough = jpos + 6
-            call_limit = min(target, s.off + s.filesz)
-            reason = b"\xba\x00\x00\x80\x00"
-            reason_pos = mm.find(reason, fallthrough, call_limit)
-            if reason_pos < 0 or mm[reason_pos + len(reason):reason_pos + len(reason) + 2] != b"\x67\xe8":
-                rejects.append(("D", m.start(), "в обходимой ветке не найден вызов с disable reason 0x800000"))
-                continue
-            if not (s.off <= target < s.off + s.filesz):
-                rejects.append(("D", m.start(), "безопасная цель выходит из исполняемого сегмента"))
-                continue
-            epilogue = bytes(mm[target:min(target + 48, s.off + s.filesz)])
-            if b"\x48\x83\xc4" not in epilogue or b"\xc3" not in epilogue:
-                rejects.append(("D", m.start(), "цель перехода не похожа на возврат из функции"))
-                continue
-            info = (f"skip MV2 disable reason 0x800000 -> vaddr "
-                    f"0x{vaddr_of(segs, target) or 0:X}")
-            sites.append(make_site("D", mm, m, "j", b"\x0f\x85", b"\x90\xe9", info))
+        for rx in (RD, RD_ALT):
+            for m in rx.finditer(mm, s.off, s.off + s.filesz):
+                jpos = m.start("j")
+                decoded = decode_jump(mm, jpos)
+                if decoded is None:
+                    rejects.append(("D", m.start(), "не удалось разобрать переход версии manifest"))
+                    continue
+                target = decoded[0]
+                fallthrough = jpos + 6
+                call_limit = min(target, s.off + s.filesz)
+                reason = b"\xba\x00\x00\x80\x00"
+                reason_pos = mm.find(reason, fallthrough, call_limit)
+                if reason_pos < 0 or mm[reason_pos + len(reason):reason_pos + len(reason) + 2] != b"\x67\xe8":
+                    rejects.append(("D", m.start(), "в обходимой ветке не найден вызов с disable reason 0x800000"))
+                    continue
+                if not (s.off <= target < s.off + s.filesz):
+                    rejects.append(("D", m.start(), "безопасная цель выходит из исполняемого сегмента"))
+                    continue
+                epilogue = bytes(mm[target:min(target + 48, s.off + s.filesz)])
+                if b"\x48\x83\xc4" not in epilogue or b"\xc3" not in epilogue:
+                    rejects.append(("D", m.start(), "цель перехода не похожа на возврат из функции"))
+                    continue
+                info = (f"skip MV2 disable reason 0x800000 -> vaddr "
+                        f"0x{vaddr_of(segs, target) or 0:X}")
+                sites.append(make_site("D", mm, m, "j", b"\x0f\x85", b"\x90\xe9", info))
     # MV2 availability gate: remove JLE so both manifest versions fall through
     # to the already-validated allowed path (xor r14d,r14d; jmp common return).
     for s in segs:
