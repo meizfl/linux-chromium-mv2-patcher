@@ -1,6 +1,6 @@
 # Linux Chromium MV2 patcher
 
-This project ports the Windows tool's supported Linux workflow to Linux x86-64. Linux uses ELF program headers and file offsets instead of PE sections/RVAs and a live `chrome.dll`; it patches the installed Chromium executable on disk, so no helper stays resident. The GTK 4 desktop app and CLI share the same fail-closed patcher and profile repair logic.
+This project ports the Windows tool's supported Linux workflow to Linux x86-64. Linux uses ELF program headers and file offsets instead of PE sections/RVAs and a live `chrome.dll`; it patches the installed Chromium executable on disk, so no helper stays resident.
 
 The binary rules in `mv2ctl.py` currently have independently validated ELF profiles:
 
