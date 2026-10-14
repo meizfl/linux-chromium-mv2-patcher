@@ -18,7 +18,6 @@ Each profile has its own expected site counts and checks branch destinations bef
 - The Chromium binary and its matching `resources.pak`.
 - Root privileges only for replacing a system-installed binary. Profile repair should run as the profile owner.
 - Fully close Chromium before `apply`, `restore`, or profile repair.
-- GTK 4 / PyGObject for the desktop interface; `pkexec` is used to request administrator privileges for system-browser patching.
 
 ## Commands
 
