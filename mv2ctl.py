@@ -1,24 +1,24 @@
 #!/usr/bin/env python3
 """
-mv2patch.py — патч Chromium (Linux x86-64) на диске: возвращает поддержку Manifest V2.
+mv2patch.py — patch Chromium (Linux x86-64) on disk to restore Manifest V2 support.
 
-  python3 mv2ctl.py analyze [BIN]             только чтение, показывает найденные места
-  sudo python3 mv2ctl.py apply [BIN]          бэкап + патч (атомарная замена файла)
-  sudo python3 mv2ctl.py restore [BIN]        вернуть оригинал из бэкапа
-  python3 mv2ctl.py status [BIN]              состояние бинарника
-  python3 mv2ctl.py repair-profile [PROFILE]  восстановить отключённые MV2-расширения
-  python3 mv2ctl.py launch [BIN] [-- ARGS]   запустить проверенный пропатченный браузер
-  python3 mv2ctl.py install-shortcut [BIN]    создать ярлык приложения
+  python3 mv2ctl.py analyze [BIN]             read-only; show detected sites
+  sudo python3 mv2ctl.py apply [BIN]          back up and patch (atomic file replacement)
+  sudo python3 mv2ctl.py restore [BIN]        restore the original from backup
+  python3 mv2ctl.py status [BIN]              show binary status
+  python3 mv2ctl.py repair-profile [PROFILE]  clear the MV2-disabled reason from extensions
+  python3 mv2ctl.py launch [BIN] [-- ARGS]   launch a verified patched browser
+  python3 mv2ctl.py install-shortcut [BIN]    create an application shortcut
 
-BIN по умолчанию ищется автоматически (/usr/lib/chromium/chromium).
+BIN is auto-detected by default (/usr/lib/chromium/chromium).
 
-Как это работает. Компилятор встроил проверку IsExtensionAffected() в несколько мест.
-Во всех копиях первой идёт проверка «manifest_version > 2 -> не затронуто». Мы заставляем эту ветку
-срабатывать всегда (как Windows-версия: jg -> jmp). Каждая копия проверяется по полной
-последовательности байт и по тому, что ВСЕ «безопасные выходы» ведут в одну точку.
-Любое несовпадение количества или структуры — отказ без записи (fail-closed).
+How it works: the compiler inlined IsExtensionAffected() at several locations.
+Each copy first checks "manifest_version > 2 -> unaffected." We make this branch
+always take that path (as in the Windows version: jg -> jmp). Each copy is validated
+against its full byte sequence and checked to ensure ALL "safe exits" lead to one target.
+Any mismatch in the number or structure of sites aborts without writing (fail-closed).
 
-Запись идёт во временную копию, которая атомарно подменяет оригинал (работающий Chromium не ломается).
+Changes are written to a temporary copy, which atomically replaces the original (a running Chromium is left untouched).
 """
 import hashlib
 import mmap
@@ -55,7 +55,7 @@ EXPECT_PROFILES = {
                                                  "U": 0, "M": 0, "I": 0, "V": 2, "H": 1},
 }
 
-# ------------------------------------------------------------------ regex-блоки
+# ------------------------------------------------------------------ regex patterns
 F = re.DOTALL
 HDR = rb"\x83[\x78-\x7f]\x50\x02"                             # cmp dword [reg+0x50], 2
 FLAGCHK = rb"\x41?\x80[\xb8-\xbf]\x08\x02\x00\x00\x00\x75."   # cmp byte [reg+0x208],0 ; jne
@@ -64,19 +64,19 @@ LOADLOC = rb"\x41?\x8b[\x40-\x7f]\x50"                        # mov r32,[r64+0x5
 LOADTYP = rb"\x41?\x8b[\x80-\xbf]\x88\x00\x00\x00"            # mov r32,[r64+0x88]
 MASK_BT = rb"[\xb8-\xbf]\x0a\x01\x00\x00\x0f\xa3[\xc0-\xff]"  # mov r32,0x10A ; bt r32,r32
 
-# Форма A: jg short (inline-копии с короткими переходами)
+# Form A: jg short (inlined copies with short branches)
 RA = re.compile(
     HDR + rb"(?P<j>[\x7f\xeb].)" + LOAD228 + LOADLOC + FLAGCHK + LOADTYP +
     rb"\x83[\xf8-\xff]\x08(?P<ja>\x77.)" + MASK_BT + rb"(?P<jae>\x73.)" +
     rb"\x83\xf8[\x05\x0a](?P<je>\x74.)\x83\xf8[\x05\x0a](?P<jne>\x75.|\x0f\x85....)", F)
 
-# Форма B: jg near (rel32), тот же код с длинными переходами
+# Form B: jg near (rel32), same code with long branches
 RB = re.compile(
     HDR + rb"(?P<j>\x0f\x8f....|\x90\xe9....)" + LOAD228 + LOADLOC + FLAGCHK + LOADTYP +
     rb"\x83[\xf8-\xff]\x08(?P<ja>\x0f\x87....)\x0f\xa3[\xc0-\xff](?P<jae>\x0f\x83....)" +
     rb"\x83[\xf8-\xff][\x05\x0a](?P<je1>\x0f\x84....)\x83[\xf8-\xff][\x05\x0a](?P<je2>\x0f\x84....)", F)
 
-# Форма C: инвертированная ветка: jle +4 ; xor eax,eax ; jmp  (результат «не затронуто» = 0)
+# Form C: inverted branch: jle +4 ; xor eax,eax ; jmp ("unaffected" result = 0)
 RC = re.compile(
     HDR + rb"(?P<j>\x7e\x04|\x90\x90)\x31\xc0\xeb." + LOAD228 + LOADLOC + FLAGCHK + LOADTYP +
     rb"\x31\xc0\x83[\xf8-\xff]\x08\x77.[\xb8-\xbf]\x0a\x01\x00\x00\x0f\xa3[\xc0-\xff]\x73." +
@@ -92,7 +92,7 @@ RC155 = re.compile(
     rb"\x48\x8b\xb5\x98\xfd\xff\xff\x73."
     rb"\x83\xf9\x05\x0f\x95\xc2\x83\xf9\x0a\x0f\x95\xc0\x20\xd0", F)
 
-# Стартовая ветка: cmp r,r ; je rel32 ; ... mov edi,4 ; call new ; ... mov dword [rax],0x800000
+# Startup branch: cmp r,r ; je rel32 ; ... mov edi,4 ; call new ; ... mov dword [rax],0x800000
 S_NEEDLE = b"\xbf\x04\x00\x00\x00\x67\xe8"
 S_LEAD = 21
 RS = re.compile(
@@ -204,7 +204,7 @@ class Seg:
 
 def parse_exec_segments(mm):
     if mm[:4] != b"\x7fELF" or mm[4] != 2 or mm[5] != 1:
-        raise SystemExit("Это не ELF64 little-endian файл.")
+        raise SystemExit("This is not an ELF64 little-endian file.")
     e_phoff = struct.unpack_from("<Q", mm, 32)[0]
     e_phentsize, e_phnum = struct.unpack_from("<HH", mm, 54)
     segs = []
@@ -224,7 +224,7 @@ def vaddr_of(segs, off):
 
 
 def decode_jump(mm, off):
-    """Возвращает (абсолютный файловый офсет цели, длина) для jmp/jcc; nop+jmp тоже понимает."""
+    """Return (absolute file offset of target, length) for jmp/jcc; also handles nop+jmp."""
     b0 = mm[off]
     if 0x70 <= b0 <= 0x7f or b0 == 0xeb:
         rel = mm[off + 1]
@@ -239,7 +239,7 @@ def decode_jump(mm, off):
     return None
 
 
-# ------------------------------------------------------------------ поиск мест
+# ------------------------------------------------------------------ site discovery
 class Site:
     def __init__(self, kind, start, end, jpos, orig, new, state, info):
         self.kind, self.start, self.end = kind, start, end
@@ -265,11 +265,11 @@ def find_sites(mm, segs):
                 for n in names:
                     d = decode_jump(mm, m.start(n))
                     if d is None:
-                        bad = f"не удалось разобрать переход {n}"
+                        bad = f"could not decode branch {n}"
                         break
                     targets[n] = d[0]
                 if bad is None and len(set(targets.values())) > 1:
-                    bad = "«безопасные» выходы ведут в разные места: " + \
+                    bad = "safe exits lead to different destinations: " + \
                           ", ".join(f"{k}->0x{v:X}" for k, v in targets.items())
                 if bad:
                     rejects.append((kind, m.start(), bad))
@@ -282,7 +282,7 @@ def find_sites(mm, segs):
                 elif kind == "B":
                     sites.append(make_site("B", mm, m, "j", b"\x0f\x8f", b"\x90\xe9", info))
                 else:
-                    sites.append(make_site("C", mm, m, "j", b"\x7e\x04", b"\x90\x90", "xor eax,eax-путь"))
+                    sites.append(make_site("C", mm, m, "j", b"\x7e\x04", b"\x90\x90", "xor eax,eax path"))
     # Chromium 155 distro layout: same clear-result gate with two stack reloads.
     for s in segs:
         for m in RC155.finditer(mm, s.off, s.off + s.filesz):
@@ -314,7 +314,7 @@ def find_sites(mm, segs):
                 jpos = m.start("j")
                 decoded = decode_jump(mm, jpos)
                 if decoded is None:
-                    rejects.append(("D", m.start(), "не удалось разобрать переход версии manifest"))
+                    rejects.append(("D", m.start(), "could not decode manifest-version branch"))
                     continue
                 target = decoded[0]
                 fallthrough = jpos + 6
@@ -322,14 +322,14 @@ def find_sites(mm, segs):
                 reason = b"\xba\x00\x00\x80\x00"
                 reason_pos = mm.find(reason, fallthrough, call_limit)
                 if reason_pos < 0 or mm[reason_pos + len(reason):reason_pos + len(reason) + 2] != b"\x67\xe8":
-                    rejects.append(("D", m.start(), "в обходимой ветке не найден вызов с disable reason 0x800000"))
+                    rejects.append(("D", m.start(), "no call with disable reason 0x800000 found in the bypassed branch"))
                     continue
                 if not (s.off <= target < s.off + s.filesz):
-                    rejects.append(("D", m.start(), "безопасная цель выходит из исполняемого сегмента"))
+                    rejects.append(("D", m.start(), "safe target is outside the executable segment"))
                     continue
                 epilogue = bytes(mm[target:min(target + 48, s.off + s.filesz)])
                 if b"\x48\x83\xc4" not in epilogue or b"\xc3" not in epilogue:
-                    rejects.append(("D", m.start(), "цель перехода не похожа на возврат из функции"))
+                    rejects.append(("D", m.start(), "branch target does not look like a function return"))
                     continue
                 info = (f"skip MV2 disable reason 0x800000 -> vaddr "
                         f"0x{vaddr_of(segs, target) or 0:X}")
@@ -343,7 +343,7 @@ def find_sites(mm, segs):
             detail = b"\x49\x8b\x8e\x28\x02\x00\x00\x8b\x41\x50"
             detail_pos = mm.find(detail, jpos + 2, min(jpos + 192, s.off + s.filesz))
             if detail_pos < 0:
-                rejects.append(("U", m.start(), "не найдена подробная проверка назначения расширения"))
+                rejects.append(("U", m.start(), "detailed extension-location check not found"))
                 continue
             allowed_jump = decode_jump(mm, jpos + 5)
             allowed_target = allowed_jump[0] if allowed_jump else None
@@ -351,20 +351,20 @@ def find_sites(mm, segs):
             if (allowed_jump is None or allowed_target < s.off or
                     allowed_target >= s.off + s.filesz or
                     bytes(mm[allowed_target:allowed_target + len(expected_allowed)]) != expected_allowed):
-                rejects.append(("U", m.start(), "путь разрешения не ведёт к ожидаемому общему выходу"))
+                rejects.append(("U", m.start(), "allow path does not lead to the expected shared exit"))
                 continue
             if cur[0] == 0x7e:
                 disp = mm[jpos + 1]
                 disp -= 256 if disp > 127 else 0
                 target = jpos + 2 + disp
                 if target != detail_pos:
-                    rejects.append(("U", m.start(), "JLE не ведёт непосредственно в блок подробной проверки"))
+                    rejects.append(("U", m.start(), "JLE does not branch directly to the detailed-check block"))
                     continue
                 state = "original"
             elif cur == b"\x90\x90":
                 state = "patched"
             else:
-                rejects.append(("U", m.start(), "неизвестные байты у JLE"))
+                rejects.append(("U", m.start(), "unrecognized bytes at JLE"))
                 continue
             info = f"bypass UserMayLoad detail -> allowed vaddr 0x{vaddr_of(segs, allowed_target) or 0:X}"
             sites.append(Site("U", m.start(), m.end(), jpos,
@@ -386,11 +386,11 @@ def find_sites(mm, segs):
         jpos = match.start("j")
         target = target_for(seg, jpos)
         if target is None or bytes(mm[target:target + len(expected_target)]) != expected_target:
-            rejects.append((kind, match.start(), f"цель перехода не совпадает с ожидаемым путем: {label}"))
+            rejects.append((kind, match.start(), f"branch target does not match the expected path: {label}"))
             return
         cur = bytes(mm[jpos:jpos + 2])
         if cur[0] not in (0x7f, 0xeb):
-            rejects.append((kind, match.start(), "неожиданный opcode короткого перехода"))
+            rejects.append((kind, match.start(), "unexpected short-branch opcode"))
             return
         state = "original" if cur[0] == 0x7f else "patched"
         sites.append(Site(kind, match.start(), match.end(), jpos, cur[:1], b"\xeb", state,
@@ -509,7 +509,7 @@ def find_sites(mm, segs):
             sites.append(Site("S", m.start(), m.end(), jpos, b"\x7f" + cur[1:2] if not patched_ok else b"\x7f\x00",
                               b"\x7f\x00", state,
                               "neutralize version branch before the verified 0x800000 disable-reason helper"))
-    # стартовая ветка
+    # Startup branch
     for s in segs:
         pos = s.off
         end = s.off + s.filesz
@@ -535,7 +535,7 @@ def find_sites(mm, segs):
     return sites, rejects
 
 
-# ------------------------------------------------------------------ вывод
+# ------------------------------------------------------------------ output
 def hexs(b):
     return " ".join(f"{x:02X}" for x in b)
 
@@ -554,13 +554,13 @@ def dump(mm, segs, off, before, after, title):
 
 
 def discover(mm, segs, sites):
-    """Похожие, но НЕ классифицированные места — их нужно прислать для доработки правил."""
+    """Show similar but unclassified sites; share them to help refine the rules."""
     spans = [(s.start - 4, s.end + 4) for s in sites]
 
     def inside(o):
         return any(a <= o < b for a, b in spans)
 
-    print("=== Неклассифицированные похожие места (пришлите этот раздел) ===")
+    print("=== Similar unclassified sites (share this section) ===")
     shown = 0
     cmp_rx = re.compile(HDR)
     for s in segs:
@@ -572,9 +572,9 @@ def discover(mm, segs, sites):
             if b"\x28\x02\x00\x00" in win and b"\x88\x00\x00\x00" in win:
                 if shown < 25:
                     st = o - 1 if o and mm[o - 1] == 0x41 else o
-                    dump(mm, segs, st, 0, 168, f"похож на проверку (cmp [reg+0x50],2) #{shown + 1}")
+                    dump(mm, segs, st, 0, 168, f"resembles a check (cmp [reg+0x50],2) #{shown + 1}")
                 shown += 1
-    print(f"[похожих cmp-мест вне правил: {shown}]\n")
+    print(f"[similar cmp sites outside known patterns: {shown}]\n")
 
     shown = 0
     bt_rx = re.compile(rb"\x0f\xa3[\xc0-\xff]", F)
@@ -586,9 +586,9 @@ def discover(mm, segs, sites):
                 continue
             if cmp8.search(bytes(mm[o - 14:o])):
                 if shown < 25:
-                    dump(mm, segs, o, 56, 72, f"bt-маска вне правил #{shown + 1}")
+                    dump(mm, segs, o, 56, 72, f"bt mask outside known patterns #{shown + 1}")
                 shown += 1
-    print(f"[bt-мест с cmp 8 рядом вне правил: {shown}]\n")
+    print(f"[bt sites with nearby cmp 8 outside known patterns: {shown}]\n")
 
 
 def analyze(path, verbose=True, with_discovery=True):
@@ -604,19 +604,19 @@ def analyze(path, verbose=True, with_discovery=True):
         if verbose:
             print(f"binary : {path}")
             print(f"size   : {os.path.getsize(path)}")
-            print("Найденные места:")
+            print("Detected sites:")
             for s in sites:
                 print(f"  [{s.kind}] file_off=0x{s.jpos:X} vaddr=0x{vaddr_of(segs, s.jpos) or 0:X} "
                       f"state={s.state:<9} {s.info}")
             for kind, off, why in rejects:
-                print(f"  отклонено [{kind}] file_off=0x{off:X}: {why}")
-            print(f"Количество: {counts}")
+                print(f"  rejected [{kind}] file_off=0x{off:X}: {why}")
+            print(f"Counts: {counts}")
             if ok_counts:
-                print(f"Профиль: {profiles[0]} -> OK")
+                print(f"Profile: {profiles[0]} -> OK")
             else:
                 expected = {name: {k: values.get(k, 0) for k in sorted(kinds)}
                             for name, values in EXPECT_PROFILES.items()}
-                print(f"Профиль не распознан; ожидаемые наборы: {expected}")
+                print(f"Profile not recognized; expected site counts: {expected}")
             if with_discovery:
                 print()
                 discover(mm, segs, sites)
@@ -667,12 +667,12 @@ def find_bin(args):
     for p in AUTO_PATHS:
         if os.path.isfile(p):
             return os.path.realpath(p)
-    raise SystemExit("Бинарник не найден. Укажите путь явно.")
+    raise SystemExit("Binary not found. Specify its path explicitly.")
 
 
 def check_size(path):
     if os.path.getsize(path) < 10_000_000:
-        raise SystemExit(f"{path} слишком мал — это лаунчер, а не браузер.")
+        raise SystemExit(f"{path} is too small; this is a launcher, not a browser binary.")
 
 
 def atomic_install(src_tmp, dst):
@@ -680,7 +680,7 @@ def atomic_install(src_tmp, dst):
     if os.geteuid() == 0:
         os.chown(src_tmp, metadata.st_uid, metadata.st_gid)
     elif (os.geteuid(), os.getegid()) != (metadata.st_uid, metadata.st_gid):
-        raise SystemExit("Невозможно сохранить владельца Chromium без root; запустите команду через sudo.")
+        raise SystemExit("Cannot preserve Chromium file ownership without root; run this command with sudo.")
     fd = os.open(src_tmp, os.O_RDONLY)
     try:
         os.fsync(fd)
@@ -709,7 +709,7 @@ def ensure_chromium_stopped(path):
             continue
         if running == expected:
             raise SystemExit(
-                f"Chromium PID {entry} ещё запущен из этого файла. Полностью закройте браузер и повторите команду.")
+                f"Chromium PID {entry} is still running from this file. Fully close the browser and retry.")
 
 
 def cmd_apply(path, assume_yes):
@@ -717,19 +717,19 @@ def cmd_apply(path, assume_yes):
     ensure_chromium_stopped(path)
     sites, status, bad = analyze(path, verbose=True, with_discovery=False)
     if status == "fail":
-        raise SystemExit("\nОТКАЗ: структура не совпала с ожидаемой. Ничего не записано.\n"
-                         "Запустите `analyze` и пришлите вывод.")
+        raise SystemExit("\nABORTED: binary structure did not match expectations. Nothing was written.\n"
+                         "Run `analyze` and share its output.")
     if status == "patched":
-        raise SystemExit("\nУже пропатчено. Ничего не делаю.")
+        raise SystemExit("\nAlready patched. No changes made.")
     if os.geteuid() != 0 and not os.access(os.path.dirname(path), os.W_OK):
-        raise SystemExit("\nНужны права на запись в каталог бинарника: запустите через sudo.")
+        raise SystemExit("\nWrite access to the binary's directory is required; run with sudo.")
     pending = [site for site in sites if site.state == "original" and site.orig != site.new]
     if not pending:
-        raise SystemExit("Нет исходных байт для изменения.")
-    print(f"\nБудет изменено мест: {len(pending)} (из {len(sites)} проверенных).")
+        raise SystemExit("No original bytes available to patch.")
+    print(f"\nSites to be changed: {len(pending)} (out of {len(sites)} validated).")
     if not assume_yes:
-        if input("Продолжить? [y/N] ").strip().lower() != "y":
-            raise SystemExit("Отменено.")
+        if input("Continue? [y/N] ").strip().lower() != "y":
+            raise SystemExit("Cancelled.")
 
     backup = path + BACKUP_SUFFIX
     if os.path.exists(backup):
@@ -737,18 +737,18 @@ def cmd_apply(path, assume_yes):
         if (backup_status != "original" or os.path.getsize(backup) != os.path.getsize(path)
                 or sha256_ignoring_sites(backup, sites) != sha256_ignoring_sites(path, sites)):
             raise SystemExit(
-                "ОТКАЗ: существующий .mv2orig не является проверенной исходной копией этой версии. "
-                "Он оставлен без изменений.")
-        print("Проверенная исходная резервная копия уже существует:", backup)
+                "ABORTED: the existing .mv2orig is not a verified original copy of this version. "
+                "It was left unchanged.")
+        print("Verified original backup already exists:", backup)
     elif status == "original":
-        print("Создаю бэкап оригинала:", backup)
+        print("Creating original backup:", backup)
         tmpb = backup + ".tmp"
         shutil.copy2(path, tmpb)
         os.replace(tmpb, backup)
     else:
         raise SystemExit(
-            "ОТКАЗ: бинарник уже частично изменён, а проверенной исходной копии нет. "
-            "Не буду создавать бэкап из частично пропатченного файла.")
+            "ABORTED: the binary is already partially modified and no verified original copy exists. "
+            "Refusing to create a backup from a partially patched file.")
 
     tmp = path + ".mv2new"
     shutil.copy2(path, tmp)
@@ -757,33 +757,33 @@ def cmd_apply(path, assume_yes):
             for s in pending:
                 f.seek(s.jpos)
                 if f.read(len(s.orig)) != s.orig:
-                    raise SystemExit("Байты в копии не совпали с ожидаемыми — отмена.")
+                    raise SystemExit("Bytes in the copy did not match expectations; aborting.")
                 f.seek(s.jpos)
                 f.write(s.new)
             f.flush()
             os.fsync(f.fileno())
         _, st2, _ = analyze(tmp, verbose=False, with_discovery=False)
         if st2 != "patched":
-            raise SystemExit(f"Самопроверка патча не пройдена (status={st2}). Оригинал не тронут.")
+            raise SystemExit(f"Patch self-check failed (status={st2}). Original left untouched.")
         atomic_install(tmp, path)
     finally:
         if os.path.exists(tmp):
             os.remove(tmp)
-    print("Готово. Запустите Chromium заново и загрузите MV2-расширение (chrome://extensions → режим разработчика).")
-    print(f"Откат: sudo python3 {sys.argv[0]} restore")
+    print("Done. Restart Chromium and load the MV2 extension (chrome://extensions → Developer mode).")
+    print(f"Restore: sudo python3 {sys.argv[0]} restore")
 
 
 def cmd_launch(path, browser_args):
-    """Запускает только проверенный патч; стандартный Chromium сам переиспользует профиль и сессию."""
+    """Launch only a verified patched binary; Chromium reuses the standard profile and session."""
     check_size(path)
     _, status, _ = analyze(path, verbose=False, with_discovery=False)
     if status != "patched":
-        raise SystemExit(f"Запуск отменён: бинарник имеет состояние {status}. Сначала выполните apply.")
+        raise SystemExit(f"Launch aborted: binary status is {status}. Run apply first.")
     if not os.access(path, os.X_OK):
-        raise SystemExit("Бинарник не имеет права на запуск: " + path)
+        raise SystemExit("Binary is not executable: " + path)
     if any(arg == "--no-sandbox" for arg in browser_args):
-        raise SystemExit("--no-sandbox запрещён этим лаунчером.")
-    print(f"Запускаю проверенный пропатченный браузер: {path}", flush=True)
+        raise SystemExit("--no-sandbox is not allowed by this launcher.")
+    print(f"Launching verified patched browser: {path}", flush=True)
     os.execv(path, [path, *browser_args])
 
 
@@ -795,7 +795,7 @@ def cmd_install_shortcut(path):
     check_size(path)
     _, status, _ = analyze(path, verbose=False, with_discovery=False)
     if status not in ("patched", "original"):
-        raise SystemExit("Браузер не распознан поддерживаемым профилем.")
+        raise SystemExit("Browser does not match a supported profile.")
     xdg_data = os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share"))
     appdir = os.path.join(xdg_data, "applications")
     os.makedirs(appdir, mode=0o755, exist_ok=True)
@@ -816,21 +816,21 @@ def cmd_install_shortcut(path):
         shutil.copy2(appfile, link_tmp)
         os.chmod(link_tmp, 0o755)
         os.replace(link_tmp, link)
-        print("Ярлык рабочего стола:", link)
-    print("Ярлык приложения:", appfile)
+        print("Desktop shortcut:", link)
+    print("Application shortcut:", appfile)
     if status == "original":
-        print("Перед запуском ярлыка сначала выполните apply с правами на запись.")
+        print("Run apply with write permissions before launching the shortcut.")
 
 
 def cmd_restore(path):
     ensure_chromium_stopped(path)
     backup = path + BACKUP_SUFFIX
     if not os.path.exists(backup):
-        raise SystemExit("Бэкап не найден: " + backup)
+        raise SystemExit("Backup not found: " + backup)
     tmp = path + ".mv2new"
     shutil.copy2(backup, tmp)
     atomic_install(tmp, path)
-    print("Оригинал восстановлен из", backup)
+    print("Original restored from", backup)
 
 
 UNSUPPORTED_MANIFEST_VERSION_REASON = 1 << 23
@@ -866,13 +866,13 @@ def _iter_resource_candidates(resources_path):
     with open(resources_path, "rb") as f:
         pack = f.read()
     if len(pack) < 18 or struct.unpack_from("<I", pack, 0)[0] != 5:
-        raise ValueError("resources.pak должен иметь проверенный формат версии 5")
+        raise ValueError("resources.pak must use the validated version 5 format")
     resource_count = struct.unpack_from("<H", pack, 8)[0]
     for index in range(resource_count):
         current = 12 + index * 6
         following = current + 6
         if following + 6 > len(pack):
-            raise ValueError("В resources.pak обрезан индекс ресурсов")
+            raise ValueError("Resource index is truncated in resources.pak")
         start = struct.unpack_from("<I", pack, current + 2)[0]
         end = struct.unpack_from("<I", pack, following + 2)[0]
         if 0 < end - start <= 512 and end <= len(pack):
@@ -889,7 +889,7 @@ def _find_preference_seed(resources_path, roots):
             if isinstance(extension, dict) and isinstance(expected, str):
                 samples.append((f"extensions.settings.{extension_id}", extension, expected))
     if not samples:
-        raise ValueError("Нет защищённой записи расширения для проверки MAC-seed; профиль не изменён")
+        raise ValueError("No protected extension entry is available to validate the MAC seed; profile unchanged")
 
     # Chromium's Linux device-id implementation is a stub and returns
     # NOT_IMPLEMENTED; GenerateDeviceId() consequently uses an empty ID.
@@ -898,7 +898,7 @@ def _find_preference_seed(resources_path, roots):
         for path, value, expected in samples[:32]:
             if hmac_compare(_compute_pref_mac(candidate, path, value), expected):
                 return candidate
-    raise ValueError("Не удалось подтвердить MAC-seed Chromium по профилю; профиль не изменён")
+    raise ValueError("Could not verify Chromium's MAC seed against the profile; profile unchanged")
 
 
 def hmac_compare(left, right):
@@ -956,9 +956,9 @@ def cmd_repair_profile(profile_dir, resources_path):
     profile_dir = os.path.realpath(os.path.expanduser(profile_dir))
     secure_path = os.path.join(profile_dir, "Secure Preferences")
     if not os.path.isfile(secure_path):
-        raise SystemExit("Secure Preferences не найден: " + secure_path)
+        raise SystemExit("Secure Preferences not found: " + secure_path)
     if _profile_browser_is_running():
-        raise SystemExit("Сначала полностью закройте Chromium. Профиль нельзя менять во время работы браузера.")
+        raise SystemExit("Close Chromium completely first. The profile cannot be changed while the browser is running.")
 
     import json
     with open(secure_path, "r", encoding="utf-8") as f:
@@ -967,7 +967,7 @@ def cmd_repair_profile(profile_dir, resources_path):
     affected = [extension_id for extension_id, extension in settings.items()
                 if isinstance(extension, dict) and _has_mv2_disable_reason(extension)]
     if not affected:
-        print("В Secure Preferences не найден бит отключения MV2 (0x800000); изменений нет.")
+        print("No MV2-disabled bit (0x800000) found in Secure Preferences; no changes made.")
         return
 
     protection = root.get("protection")
@@ -975,7 +975,7 @@ def cmd_repair_profile(profile_dir, resources_path):
     ext_macs = macs.get("extensions") if isinstance(macs, dict) else None
     settings_macs = ext_macs.get("settings") if isinstance(ext_macs, dict) else None
     if not isinstance(settings_macs, dict):
-        raise SystemExit("Нет protection.macs.extensions.settings; профиль не изменён.")
+        raise SystemExit("Missing protection.macs.extensions.settings; profile unchanged.")
     seed = _find_preference_seed(resources_path, [root])
 
     changed = []
@@ -990,7 +990,7 @@ def cmd_repair_profile(profile_dir, resources_path):
             seed, f"extensions.settings.{extension_id}", extension)
         changed.append(extension_id)
     if not changed:
-        print("Нет MV2-причин для удаления; изменений нет.")
+        print("No MV2 disable reasons to remove; no changes made.")
         return
 
     # Linux has no Windows Registry mirror. Drop only optional encrypted
@@ -1002,7 +1002,7 @@ def cmd_repair_profile(profile_dir, resources_path):
 
     backup = secure_path + ".mv2ctl.bak"
     if os.path.exists(backup):
-        raise SystemExit("Бэкап уже существует, отказ перезаписывать: " + backup)
+        raise SystemExit("Backup already exists; refusing to overwrite: " + backup)
     shutil.copy2(secure_path, backup)
     tmp = secure_path + f".mv2ctl.{os.getpid()}.tmp"
     try:
@@ -1022,8 +1022,8 @@ def cmd_repair_profile(profile_dir, resources_path):
     finally:
         if os.path.exists(tmp):
             os.remove(tmp)
-    print(f"Снята только MV2-причина у {len(changed)} расширений: {', '.join(changed)}")
-    print("Бэкап: " + backup)
+    print(f"Removed only the MV2 disable reason from {len(changed)} extensions: {', '.join(changed)}")
+    print("Backup: " + backup)
 
 
 def main():
@@ -1042,7 +1042,7 @@ def main():
                 index += 2
                 continue
             if arg.startswith("-"):
-                raise SystemExit(f"Неизвестный параметр: {arg}")
+                raise SystemExit(f"Unknown option: {arg}")
             profile_dir = arg
             index += 1
         if resources_path is None:
@@ -1050,7 +1050,7 @@ def main():
                                    for p in AUTO_PATHS
                                    if os.path.isfile(os.path.join(os.path.dirname(p), "resources.pak"))), None)
         if resources_path is None:
-            raise SystemExit("resources.pak не найден; задайте --resources PATH")
+            raise SystemExit("resources.pak not found; specify --resources PATH")
         cmd_repair_profile(profile_dir, resources_path)
         return
 
@@ -1070,8 +1070,8 @@ def main():
     elif cmd == "analyze":
         check_size(path)
         _, status, _ = analyze(path, verbose=True, with_discovery=True)
-        print("Итог:", {"original": "готов к патчу", "patched": "уже пропатчен",
-                        "mixed": "смешанное состояние", "fail": "структура НЕ совпала"}[status])
+        print("Result:", {"original": "ready to patch", "patched": "already patched",
+                        "mixed": "mixed state", "fail": "structure mismatch"}[status])
     elif cmd == "status":
         _, status, _ = analyze(path, verbose=False, with_discovery=False)
         print(status)
