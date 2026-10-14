@@ -47,10 +47,12 @@ BACKUP_SUFFIX = ".mv2orig"
 EXPECT = {"A": 4, "B": 1, "C": 1, "D": 1, "S": 1, "U": 1}
 EXPECT_PROFILES = {
     "Chromium 154-compatible ELF layout": EXPECT,
-    "Google Chrome 155+ ELF layout": {"A": 2, "B": 0, "C": 0, "D": 1, "S": 1, "U": 1,
-                               "M": 1, "I": 1},
-    "Google Chrome 156 Beta / 157 Canary ELF": {"A": 2, "B": 0, "C": 0, "D": 1, "S": 1, "U": 2,
-                                                "M": 1, "I": 1},
+    "Google Chrome 155 / 157 Canary ELF layout": {"A": 2, "B": 0, "C": 0, "D": 1, "S": 1, "U": 1,
+                                                    "M": 1, "I": 1, "V": 1},
+    "Chrome 155 alternate / 156 Beta ELF layout": {"A": 2, "B": 0, "C": 0, "D": 1, "S": 1, "U": 2,
+                                                    "M": 1, "I": 1, "V": 1},
+    "Chromium 158 centralized MV2 policy ELF": {"A": 0, "B": 0, "C": 0, "D": 0, "S": 0,
+                                                 "U": 1, "M": 0, "I": 0, "V": 2},
 }
 
 # ------------------------------------------------------------------ regex-блоки
@@ -168,12 +170,25 @@ R155_U = re.compile(
     rb"\x83\x7f\x50\x02(?P<j>[\x7f\xeb].)"
     rb"\x41\x80\xbc\x24\x08\x02\x00\x00\x00\x0f\x85...."
     rb"\x49\x8b\x84\x24\x28\x02\x00\x00\x83\xb8\x88\x00\x00\x00\x06", F)
-# Chrome 156 Beta / 157 Canary added a second UserMayInstall helper.
+# Later Chromium builds contain an additional MV2-specific boolean helper.
 # Non-MV2 manifests return true immediately; manifest v2 enters a secondary
-# policy check. The short branch target is the verified `return true` block.
+# check. The short branch target is the verified `return true` block.
 R156_157_U = re.compile(
     rb"\x55\x48\x89\xe5\x83\x7f\x50\x02(?P<j>\x75\x0a|\xeb\x0a)"
     rb"\x48\x8b\x7f\x60\x5d\xe9....\xb0\x01\x5d\xc3", F)
+# Chromium 158 centralizes the MV2 impact decision in two overloads of
+# manifest_v2_util::IsExtensionAffected(). These complete byte windows include
+# their distinct policy checks and make the clear/unaffected return paths
+# verifiable before either branch can be changed.
+R158_V1 = re.compile(
+    rb"\x41\x83\xff\x02(?P<j>\x7e\x04|\x90\x90)"
+    rb"\x31\xc0\xeb\x21\x89\xc1\x31\xc0\x83\xfb\x08\x77\x18"
+    rb"\xba\x0a\x01\x00\x00\x0f\xa3\xda\x73\x0e"
+    rb"\x83\xf9\x05\x0f\x95\xc2\x83\xf9\x0a\x0f\x95\xc0\x20\xd0", F)
+R158_V2 = re.compile(
+    rb"\x31\xc0\x83\xff\x02(?P<j>\x7f\x1d|\xeb\x1d)"
+    rb"\x83\xfe\x08\x77\x18\xb9\x0a\x01\x00\x00\x0f\xa3\xf1\x73\x0e"
+    rb"\x83\xfa\x05\x0f\x95\xc1\x83\xfa\x0a\x0f\x95\xc0\x20\xc8\x5d\xc3", F)
 R155_S = re.compile(
     rb"\xba\x00\x00\x80\x00\xe8....\x84\xc0\x74."
     rb"\x83\x7b\x50\x02(?P<j>\x7f.)"
@@ -434,7 +449,49 @@ def find_sites(mm, segs):
                 rejects.append(("U", m.start(), "unknown Beta/Canary UserMayInstall branch bytes"))
                 continue
             sites.append(Site("U", m.start(), m.end(), jpos, b"\x75\x0a", b"\xeb\x0a", state,
-                              f"bypass Beta/Canary MV2 policy detail -> vaddr 0x{vaddr_of(segs, target) or 0:X}"))
+                              f"bypass MV2-specific helper -> vaddr 0x{vaddr_of(segs, target) or 0:X}"))
+
+        for m in R158_V1.finditer(mm, seg.off, seg.off + seg.filesz):
+            jpos = m.start("j")
+            cur = bytes(mm[jpos:jpos + 2])
+            safe = decode_jump(mm, jpos + 4)
+            safe_target = safe[0] if safe else None
+            detail_ok = (bytes(mm[jpos + 6:jpos + 9]) == b"\x89\xc1\x31" and
+                         bytes(mm[jpos + 9:jpos + 13]) == b"\xc0\x83\xfb\x08")
+            safe_ok = (safe_target is not None and in_segment(seg, safe_target, 11) and
+                       bytes(mm[safe_target:safe_target + 11]) ==
+                       b"\x48\x83\xc4\x08\x5b\x41\x5e\x41\x5f\x5d\xc3")
+            if not detail_ok or not safe_ok:
+                rejects.append(("V", m.start(), "Extension IsExtensionAffected branch paths did not validate"))
+                continue
+            if cur == b"\x7e\x04":
+                state = "original"
+            elif cur == b"\x90\x90":
+                state = "patched"
+            else:
+                rejects.append(("V", m.start(), "Extension IsExtensionAffected: unknown branch bytes"))
+                continue
+            sites.append(Site("V", m.start(), m.end(), jpos, b"\x7e\x04", b"\x90\x90", state,
+                              f"Extension IsExtensionAffected clear-result path -> vaddr "
+                              f"0x{vaddr_of(segs, safe_target) or 0:X}"))
+
+        for m in R158_V2.finditer(mm, seg.off, seg.off + seg.filesz):
+            jpos = m.start("j")
+            cur = bytes(mm[jpos:jpos + 2])
+            target = target_for(seg, jpos)
+            if target is None or bytes(mm[target:target + 2]) != b"\x5d\xc3":
+                rejects.append(("V", m.start(), "scalar IsExtensionAffected unaffected return did not validate"))
+                continue
+            if cur == b"\x7f\x1d":
+                state = "original"
+            elif cur == b"\xeb\x1d":
+                state = "patched"
+            else:
+                rejects.append(("V", m.start(), "scalar IsExtensionAffected: unknown branch bytes"))
+                continue
+            sites.append(Site("V", m.start(), m.end(), jpos, b"\x7f\x1d", b"\xeb\x1d", state,
+                              f"scalar IsExtensionAffected unaffected return -> vaddr "
+                              f"0x{vaddr_of(segs, target) or 0:X}"))
 
         for m in R155_S.finditer(mm, seg.off, seg.off + seg.filesz):
             jpos = m.start("j")
