@@ -49,6 +49,8 @@ EXPECT_PROFILES = {
     "Chromium 154-compatible ELF layout": EXPECT,
     "Google Chrome 155 / 156 Beta ELF layout": {"A": 2, "B": 0, "C": 0, "D": 1, "S": 1, "U": 1,
                                                  "M": 1, "I": 1, "V": 1, "H": 1},
+    "Alacrium Browser 155-based ELF layout": {"A": 2, "B": 0, "C": 0, "D": 1, "S": 1, "U": 1,
+                                              "M": 1, "I": 2, "V": 1, "H": 1},
     "Google Chrome 157 Canary ELF layout": {"A": 2, "B": 0, "C": 0, "D": 1, "S": 1, "U": 0,
                                              "M": 1, "I": 1, "V": 1, "H": 1},
     "Chromium 158 centralized MV2 policy ELF": {"A": 0, "B": 0, "C": 0, "D": 0, "S": 0,
