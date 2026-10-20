@@ -79,6 +79,7 @@ from mv2profiles import (
     WIN_INSTALL_V9_ERROR,
     WIN_INSTALL_V11_ERROR,
     WIN_INSTALL_V12_ERROR,
+    WIN_INSTALL_V13_ERROR,
     WIN_INSTALL_V8_TYPES,
     WIN_EXTENSION_FILTER_V11,
     WIN_STARTUP_V5,
@@ -680,6 +681,7 @@ def find_sites(mm, segs):
                         (WIN_INSTALL_V10_ERROR, "Chrome 157"),
                         (WIN_INSTALL_V11_ERROR, "Chrome 158"),
                         (WIN_INSTALL_V12_ERROR, "Chrome 158.0.8106"),
+                        (WIN_INSTALL_V13_ERROR, "Chrome 156.0.8078.48"),
                     )
                     validated_error = next(
                         (label for error_rx, label in error_profiles
@@ -696,6 +698,7 @@ def find_sites(mm, segs):
                         "Chrome 157": "W5_157",
                         "Chrome 158": "W5_158",
                         "Chrome 158.0.8106": "W5_158_8106",
+                        "Chrome 156.0.8078.48": "W5_156",
                     }.get(install_label, "W5")
                     sites.append(Site(install_kind, m.start(), m.end(), j, b"\x7f", b"\xeb", state,
                                       f"{install_label} UserMayInstall clone"))
