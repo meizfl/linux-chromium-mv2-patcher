@@ -1,23 +1,34 @@
-# Linux Chromium MV2 patcher
+# Chromium MV2 patcher (Linux patch profiles)
 
-This project ports the Windows tool's supported Linux workflow to Linux x86-64. Linux uses ELF program headers and file offsets instead of PE sections/RVAs and a live `chrome.dll`; it patches the installed Chromium executable on disk, so no helper stays resident.
+This project ports the Windows tool's supported Linux workflow to Linux x86-64 and recognizes the independently verified Chromium 158 x86-64 Mach-O framework layout. It patches the executable image on disk, so no helper stays resident. The GTK 4 desktop app and CLI share the same fail-closed patcher and profile repair logic.
+
+Binary patching supports the validated Linux x86-64 ELF profiles below, Chromium 158.0.8115.0 x86-64 Mach-O frameworks, and Windows PE x86-64 `chrome.dll` profiles. The Windows Chrome 152/155/157/158 profiles validate the complete family of MV2 gates, including split extension checkers, the integer overload, install/disable/re-enable policy clones, and the startup disable loop. macOS arm64 binaries are identified and rejected before any write because their code layout has not been validated. If a macOS app bundle is signed, modifying its framework invalidates that signature; verify and re-sign it on macOS before launch. The desktop UI currently requires GTK 4 / PyGObject and is Linux-oriented.
 
 The binary rules in `mv2ctl.py` currently have independently validated ELF profiles:
 
 - Arch Chromium 154.0.8037.97 and Chromium 155.0.8059.79 with the same ELF layout, including the impact-checker/startup sites and Linux-specific disable-reason and `UserMayLoad` helpers. The 155 distro build has alternate compiler shapes for two sites; both targets are validated.
 - Chrome for testing 155.0.8059.79, 156.0.8078.12 and 157.0.8102.0. The 155/156 layouts include the `UserMayInstall` gate; Canary 157 does not. All three profiles validate the scalar `IsExtensionAffected` path and recognize the content-hash helper as read-only.
 - Chromium 158.0.8105.0 centralizes the MV2 impact decision in two `manifest_v2_util::IsExtensionAffected` overloads. Both the extension-object and scalar paths are counted, and their safe return destinations are validated. The profile also preserves the signed-resource hash filter.
+- Windows `chrome.dll` and macOS Intel `Chromium Framework` 158.0.8115.0 each validate the extension-object and scalar `IsExtensionAffected` paths against platform-specific PE/Mach-O instruction layouts and checked return destinations. The arm64 Mac build is not yet supported.
+- Google Chrome 152 Windows x86-64 validates the v5 checker and policy-clone family, including a second checker copy with a different register allocation. An on-disk apply and post-write self-check completed on the supplied 297 MB `chrome.dll`.
+- Chrome 155 Windows x86-64 validates the full v7/v8 gate family and the resource-8129 unsupported-manifest path. An on-disk apply and post-write self-check completed on Chrome 155.0.8059.85 `chrome.dll`.
+- Google Chrome for Testing 157.0.8103.6 Windows x86-64 validates the same gate family with its distinct resource-8130 unsupported-manifest path. An on-disk apply and post-write self-check completed on the supplied `chrome.dll`.
+- Google Chrome for Testing 158.0.8113.0 Windows x86-64 validates the changed extension-version filter, startup disable loop, and resource-8244 unsupported-manifest path. An on-disk apply and post-write self-check completed on the supplied `chrome.dll`.
+- Google Chrome for Testing 158.0.8106.0 Windows x86-64 validates the extension-overload checker, startup disable branch, and resource-8183 (`0x1FF7`) unsupported-manifest path.
 
 `ContentHash::ShouldComputeHashesForResource` is never patched: for signed hashes it intentionally selects only resources with a signed tree-hash root. If an older patch changed this gate, analysis rejects the binary; restore from its verified `.mv2orig` and apply the current patcher again.
 
 Each profile has its own expected site counts and checks branch destinations before editing. Unknown or mixed layouts fail closed. Other builds, including later Canary versions, are not automatically assumed compatible; run `analyze` after each browser update and add a profile only after validating its control flow.
 
+The binary signatures and expected site counts are kept in [mv2profiles.py](./mv2profiles.py), separate from the patching logic in `mv2ctl.py`. Add a new build there only after confirming every candidate and branch destination.
+
 ## Requirements
 
-- Linux x86-64, Python 3.10 or newer.
+- Linux x86-64, Python 3.10 or newer, for binary patching.
 - The Chromium binary and its matching `resources.pak`.
 - Root privileges only for replacing a system-installed binary. Profile repair should run as the profile owner.
 - Fully close Chromium before `apply`, `restore`, or profile repair.
+- GTK 4 / PyGObject for the desktop interface; `pkexec` is used to request administrator privileges for system-browser patching.
 
 ## Commands
 
