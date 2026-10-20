@@ -23,6 +23,10 @@ EXPECT_PROFILES = {
                                               "M": 1, "I": 2, "V": 1, "H": 1},
     "Google Chrome 157 Canary ELF layout": {"A": 2, "B": 0, "C": 0, "D": 1, "S": 1, "U": 0,
                                              "M": 1, "I": 1, "V": 1, "H": 1},
+    "Google Chrome for Testing 158.0.8113.0 ELF x86-64": {
+        "A": 2, "B": 0, "C": 0, "D": 0, "S": 1, "U": 0,
+        "M": 1, "I": 1, "V": 1, "H": 1,
+    },
     "Chromium 158 centralized MV2 policy x86-64": {"A": 0, "B": 0, "C": 0, "D": 0, "S": 0,
                                                  "U": 0, "M": 0, "I": 0, "V": 2, "H": 1},
     "Chromium 158 Windows PE x86-64": {"A": 0, "B": 0, "C": 0, "D": 0, "S": 0,
