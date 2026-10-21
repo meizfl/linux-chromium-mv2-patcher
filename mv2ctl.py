@@ -51,11 +51,14 @@ from mv2profiles import (
     RD,
     RD_ALT,
     RU,
+    RU_ALT,
     R155_M,
+    R155_M_ALT,
     R155_A1,
     R155_A2,
     R155_I,
     R155_D,
+    R155_D_ALT,
     R155_U,
     RHASH,
     R158_V1,
@@ -377,6 +380,25 @@ def find_sites(mm, segs):
             sites.append(Site("U", m.start(), m.end(), jpos,
                               b"\x7e" + bytes([mm[jpos + 1]]) if state == "original" else b"\x90\x90",
                               b"\x90\x90", state, info))
+        for m in RU_ALT.finditer(mm, s.off, s.off + s.filesz):
+            jpos = m.start("j")
+            allowed_jump = decode_jump(mm, jpos + 5)
+            allowed_target = allowed_jump[0] if allowed_jump else None
+            detail = jpos + 2 + 0x51
+            if (not (s.off <= detail and detail + 24 <= s.off + s.filesz) or
+                    bytes(mm[detail:detail + 14]) !=
+                    b"\x49\x8b\x8e\x28\x02\x00\x00\x8b\x41\x50\x41\x80\xbe\x08" or
+                    allowed_target is None or not (s.off <= allowed_target < s.off + s.filesz) or
+                    bytes(mm[allowed_target:allowed_target + 4]) != b"\xf6\x45\xc0\x01" or
+                    mm.find(b"\xb8\x00\x00\x80\x00", detail,
+                            min(detail + 0x80, s.off + s.filesz)) < 0):
+                rejects.append(("U", m.start(), "alternate UserMayLoad detail/allowed paths did not validate"))
+                continue
+            cur = bytes(mm[jpos:jpos + 2])
+            state = "original" if cur == b"\x7e\x51" else "patched" if cur == b"\x90\x90" else "unknown"
+            sites.append(Site("U", m.start(), m.end(), jpos,
+                              b"\x7e\x51" if state == "original" else b"\x90\x90", b"\x90\x90", state,
+                              f"bypass MV2 UserMayLoad detail -> vaddr 0x{vaddr_of(segs, allowed_target) or 0:X}"))
     # Google Chrome 155+ ELF layout. The function shapes differ from Arch
     # Chromium 154, so recognize each role independently and validate its
     # branch destination and the companion MV2 logic before accepting it.
@@ -421,6 +443,21 @@ def find_sites(mm, segs):
             sites.append(Site("M", m.start(), m.end(), jpos, b"\x0f\x8f", b"\x90\xe9", state,
                               f"MustRemainDisabled false-return path -> vaddr 0x{vaddr_of(segs, target) or 0:X}"))
 
+        for m in R155_M_ALT.finditer(mm, seg.off, seg.off + seg.filesz):
+            jpos = m.start("j")
+            target = target_for(seg, jpos)
+            reason = (mm.find(b"\xba\x00\x00\x80\x00\xe8", m.end(), target)
+                      if target is not None else -1)
+            if (target is None or
+                    bytes(mm[target:target + 9]) != b"\x64\x48\x8b\x04\x25\x28\x00\x00\x00" or
+                    reason < 0):
+                rejects.append(("M", m.start(), "MustRemainDisabled clone exit or 0x800000 path did not validate"))
+                continue
+            cur = bytes(mm[jpos:jpos + 6])
+            state = "original" if cur[:2] == b"\x0f\x85" else "patched" if cur[:2] == b"\x90\xe9" else "unknown"
+            sites.append(Site("M", m.start(), m.end(), jpos, b"\x0f\x85", b"\x90\xe9", state,
+                              f"MustRemainDisabled MV2-only path -> vaddr 0x{vaddr_of(segs, target) or 0:X}"))
+
         for m in R155_A1.finditer(mm, seg.off, seg.off + seg.filesz):
             short_branch_site("A", seg, m,
                               (b"\x48\x8b\x46\x08", b"\x49\x8b\x45\x08"),
@@ -441,6 +478,20 @@ def find_sites(mm, segs):
             state = "original" if cur[:2] == b"\x0f\x85" else "patched" if cur[:2] == b"\x90\xe9" else "unknown"
             sites.append(Site("D", m.start(), m.end(), jpos, b"\x0f\x85", b"\x90\xe9", state,
                               f"bypass MV2-only re-enable detail -> vaddr 0x{vaddr_of(segs, target) or 0:X}"))
+
+        for m in R155_D_ALT.finditer(mm, seg.off, seg.off + seg.filesz):
+            jpos = m.start("j")
+            target = target_for(seg, jpos)
+            reason = mm.find(b"\xc7\x00\x00\x00\x80\x00", m.end(),
+                             min(m.start() + 0x500, seg.off + seg.filesz))
+            if (target is None or bytes(mm[target:target + 6]) != b"\x49\x8b\x47\x08\x48\x85" or
+                    reason < 0):
+                rejects.append(("D", m.start(), "disable-list next-item or 0x800000 path did not validate"))
+                continue
+            cur = bytes(mm[jpos:jpos + 6])
+            state = "original" if cur[:2] == b"\x0f\x8f" else "patched" if cur[:2] == b"\x90\xe9" else "unknown"
+            sites.append(Site("D", m.start(), m.end(), jpos, b"\x0f\x8f", b"\x90\xe9", state,
+                              f"skip MV2 disable-list insertion -> vaddr 0x{vaddr_of(segs, target) or 0:X}"))
 
         for m in R155_U.finditer(mm, seg.off, seg.off + seg.filesz):
             short_branch_site("U", seg, m, b"\x48\x8d\x1d", "UserMayInstall normal policy path")
@@ -547,12 +598,17 @@ def find_sites(mm, segs):
 
         for m in R155_S.finditer(mm, seg.off, seg.off + seg.filesz):
             jpos = m.start("j")
+            if any(site.kind == "A" and site.jpos == jpos for site in sites):
+                continue
             cur = bytes(mm[jpos:jpos + 2])
             fallthrough = jpos + 2
             target = target_for(seg, jpos) if cur[1] != 0 else None
-            target_ok = (target is not None and bytes(mm[target:target + 4]) == b"\x49\x8b\x7e\x18")
-            patched_ok = cur == b"\x7f\x00" and mm.find(b"\x49\x8b\x7e\x18", fallthrough,
-                                                           min(fallthrough + 128, seg.off + seg.filesz)) >= 0
+            next_item = (b"\x49\x8b\x7e\x18", b"\x4d\x8b\x76\x18")
+            target_ok = (target is not None and any(bytes(mm[target:target + len(op)]) == op
+                                                     for op in next_item))
+            patched_ok = cur == b"\x7f\x00" and any(
+                mm.find(op, fallthrough, min(fallthrough + 128, seg.off + seg.filesz)) >= 0
+                for op in next_item)
             if not (target_ok or patched_ok):
                 rejects.append(("S", m.start(), "startup disable target does not match the validated helper"))
                 continue
@@ -577,6 +633,12 @@ def find_sites(mm, segs):
             if not m:
                 continue
             jpos = st + m.start("j")
+            # Some Chrome 155 layouts place the startup version branch at
+            # the same instruction as an already-validated extension checker.
+            # The A patch jumps over the policy detail path; do not emit a
+            # conflicting second edit for that byte range.
+            if any(site.kind == "A" and site.jpos == jpos for site in sites):
+                continue
             d = decode_jump(mm, jpos)
             cur = bytes(mm[jpos:jpos + 2])
             state = "original" if cur == b"\x0f\x84" else "patched" if cur == b"\x90\xe9" else "unknown"
