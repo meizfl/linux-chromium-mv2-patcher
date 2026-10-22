@@ -7,6 +7,8 @@ Binary patching supports the validated Linux x86-64 ELF profiles below, Chromium
 The binary rules in `mv2ctl.py` currently have independently validated ELF profiles:
 
 - Arch Chromium 154.0.8037.97 and Chromium 155.0.8059.79 with the same ELF layout, including the impact-checker/startup sites and Linux-specific disable-reason and `UserMayLoad` helpers. The 155 distro build has alternate compiler shapes for two sites; both targets are validated.
+- Chromium distro ELF layout from the supplied `chromium-browser` binary: four extension-object checks, one integer checker, manifest gate, `MustRemainDisabled` clone, `UserMayLoad`, and read-only signed-resource hash filter. Its disable-reason call uses an alternate unprefixed `E8` encoding; all branch targets are validated.
+- Another Chromium distro ELF layout, identified from `/home/meizfl/Downloads/chromium/chromium`: four extension-object checks, one clear-result path, and the startup disable-list gate. Its profile-ready MV2 metric callback is verified and counted read-only; it is not treated as a `MustRemainDisabled` patch site. `test-apply` verified six unique edits on a separate binary copy.
 - Chrome for testing 155.0.8059.79, 156.0.8078.12 and 157.0.8102.0. The 155/156 layouts include the `UserMayInstall` gate; Canary 157 does not. All three profiles validate the scalar `IsExtensionAffected` path and recognize the content-hash helper as read-only.
 - Chromium 158.0.8105.0 centralizes the MV2 impact decision in two `manifest_v2_util::IsExtensionAffected` overloads. Both the extension-object and scalar paths are counted, and their safe return destinations are validated. The profile also preserves the signed-resource hash filter.
 - Google Chrome for Testing 158.0.8113.0 Linux x86-64 uses a separate ELF layout with two extension-object checks, the `MustRemainDisabled` helper, integer and scalar checks, and the startup version gate. The signed-resource hash filter is recognized as read-only.
@@ -15,13 +17,15 @@ The binary rules in `mv2ctl.py` currently have independently validated ELF profi
 - Google Chrome 152 Windows x86-64 validates the v5 checker and policy-clone family, including a second checker copy with a different register allocation. An on-disk apply and post-write self-check completed on the supplied 297 MB `chrome.dll`.
 - Chrome 155 Windows x86-64 validates the full v7/v8 gate family and the resource-8129 unsupported-manifest path. An on-disk apply and post-write self-check completed on Chrome 155.0.8059.85 `chrome.dll`.
 - Google Chrome for Testing 157.0.8103.6 Windows x86-64 validates the same gate family with its distinct resource-8130 unsupported-manifest path. An on-disk apply and post-write self-check completed on the supplied `chrome.dll`.
-- Google Chrome for Testing 158.0.8113.0 Windows x86-64 validates the changed extension-version filter, startup disable loop, and resource-8244 unsupported-manifest path. An on-disk apply and post-write self-check completed on the supplied `chrome.dll`.
+- Google Chrome for Testing 158.0.8113.0 and 158.0.8116.0 Windows x86-64 validate the changed extension-version filter, startup disable loop (including the 8116.0 reason-object layout), and resource-8244 unsupported-manifest path. An on-disk apply and post-write self-check completed on the supplied 8113.0 `chrome.dll`.
 - Google Chrome for Testing 158.0.8106.0 Windows x86-64 validates the extension-overload checker, startup disable branch, and resource-8183 (`0x1FF7`) unsupported-manifest path.
 - Google Chrome for Testing 156.0.8078.48 Windows x86-64 validates the same gate family with its resource-8122 (`0x1FBA`) `UserMayInstall` path.
 
 `ContentHash::ShouldComputeHashesForResource` is never patched: for signed hashes it intentionally selects only resources with a signed tree-hash root. If an older patch changed this gate, analysis rejects the binary; restore from its verified `.mv2orig` and apply the current patcher again.
 
 Each profile has its own expected site counts and checks branch destinations before editing. Unknown or mixed layouts fail closed. Other builds, including later Canary versions, are not automatically assumed compatible; run `analyze` after each browser update and add a profile only after validating its control flow.
+
+On an unknown or partly recognized build, `analyze` also runs an instruction-level semantic scan when Capstone is installed (`python3 -m pip install -r requirements.txt`). It searches decoded x86-64 instructions for manifest-version comparisons and nearby MV2 dataflow landmarks while tolerating register allocation and branch-encoding differences. Rejected signature anchors are decoded directly as well, so their control flow and rejection reason remain visible even when a linear sweep loses instruction alignment. These candidates are diagnostic only; applying still requires a validated profile and verified control-flow targets. This keeps unfamiliar distro builds fail-closed while making profile development less dependent on exact byte strings.
 
 The binary signatures and expected site counts are kept in [mv2profiles.py](./mv2profiles.py), separate from the patching logic in `mv2ctl.py`. Add a new build there only after confirming every candidate and branch destination.
 
@@ -34,6 +38,16 @@ The binary signatures and expected site counts are kept in [mv2profiles.py](./mv
 - GTK 4 / PyGObject for the desktop interface; `pkexec` is used to request administrator privileges for system-browser patching.
 
 ## Commands
+
+Create a patched test copy and verify it without changing the source binary or creating a backup:
+
+```sh
+python3 ./mv2ctl.py test-apply /path/to/chromium
+# Or choose an output path:
+python3 ./mv2ctl.py test-apply /path/to/chromium --output /tmp/chromium-mv2-test
+```
+
+The command requires a fully recognized profile, patches a separate copy, and confirms that the normal analyzer reports it as patched. It does not launch Chromium or verify extension behavior; use the printed copy path for an isolated manual browser test. Unknown or partly recognized builds are refused.
 
 Inspect the installed binary without changing it:
 

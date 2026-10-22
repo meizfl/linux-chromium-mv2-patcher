@@ -3,6 +3,7 @@
 mv2patch.py — patch Chromium (Linux x86-64) on disk to restore Manifest V2 support.
 
   python3 mv2ctl.py analyze [BIN]             read-only; show detected sites
+  python3 mv2ctl.py test-apply [BIN]          patch a separate copy and verify it
   sudo python3 mv2ctl.py apply [BIN]          back up and patch (atomic file replacement)
   sudo python3 mv2ctl.py restore [BIN]        restore the original from backup
   python3 mv2ctl.py status [BIN]              show binary status
@@ -30,6 +31,7 @@ import struct
 import subprocess
 import sys
 import shlex
+import tempfile
 
 from mv2profiles import (
     EXPECT,
@@ -88,15 +90,20 @@ from mv2profiles import (
     WIN_STARTUP_V5,
     WIN_STARTUP_V6,
     WIN_STARTUP_V11,
+    WIN_STARTUP_V12,
     WIN_STARTUP_TARGET_V5,
     WIN_STARTUP_TARGET_V6,
     WIN_STARTUP_TARGET_V11,
+    WIN_STARTUP_TARGET_V12,
 )
 
 try:
     import capstone
+    from capstone import x86_const as CAPSTONE_X86
     CS = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
+    CS.detail = True
 except Exception:
+    CAPSTONE_X86 = None
     CS = None
 
 AUTO_PATHS = [
@@ -446,11 +453,31 @@ def find_sites(mm, segs):
         for m in R155_M_ALT.finditer(mm, seg.off, seg.off + seg.filesz):
             jpos = m.start("j")
             target = target_for(seg, jpos)
-            reason = (mm.find(b"\xba\x00\x00\x80\x00\xe8", m.end(), target)
+            reason = (mm.find(b"\xba\x00\x00\x80\x00", m.end(), target)
                       if target is not None else -1)
+            # Some distro builds contain a similar MV2-version comparison in
+            # ManifestV2Handler's profile-ready metrics callback. It only reads
+            # the 0x800000 disable reason and returns through a normal epilogue;
+            # it is not the MustRemainDisabled policy gate and must not be
+            # rewritten. Record it as a validated, read-only profile landmark.
+            metrics_epilogue = b"\x48\x83\xc4\x28\x5b\x41\x5c\x41\x5d\x41\x5e\x41\x5f\x5d\xc3"
+            call_pos = reason + 5 if reason >= 0 else -1
+            direct_call = (call_pos >= 0 and mm[call_pos:call_pos + 1] == b"\xe8")
+            prefixed_call = (call_pos >= 0 and mm[call_pos:call_pos + 2] == b"\x67\xe8")
+            call_end = call_pos + (6 if prefixed_call else 5)
+            metrics_check = b"\x45\x84\xff\x74\x08\x84\xc0\x0f\x85"
+            if (target is not None and bytes(mm[target:target + len(metrics_epilogue)]) == metrics_epilogue and
+                    reason >= 0 and (direct_call or prefixed_call) and
+                    bytes(mm[call_end:call_end + len(metrics_check)]) == metrics_check):
+                cur = bytes(mm[jpos:jpos + 2])
+                sites.append(Site("T", m.start(), m.end(), jpos, cur, cur, "ignored",
+                                  "ManifestV2Handler profile-ready read-only disable-reason metric"))
+                continue
             if (target is None or
                     bytes(mm[target:target + 9]) != b"\x64\x48\x8b\x04\x25\x28\x00\x00\x00" or
-                    reason < 0):
+                    reason < 0 or
+                    not (mm[reason + 5:reason + 6] == b"\xe8" or
+                         mm[reason + 5:reason + 7] == b"\x67\xe8")):
                 rejects.append(("M", m.start(), "MustRemainDisabled clone exit or 0x800000 path did not validate"))
                 continue
             cur = bytes(mm[jpos:jpos + 6])
@@ -765,9 +792,13 @@ def find_sites(mm, segs):
                     sites.append(Site(install_kind, m.start(), m.end(), j, b"\x7f", b"\xeb", state,
                                       f"{install_label} UserMayInstall clone"))
 
-            startup_v11 = is158 and not is158_8106
-            startup_rx = WIN_STARTUP_V11 if startup_v11 else WIN_STARTUP_V6 if (is155 or is158_8106) else WIN_STARTUP_V5
-            target_rx = WIN_STARTUP_TARGET_V11 if startup_v11 else WIN_STARTUP_TARGET_V6 if (is155 or is158_8106) else WIN_STARTUP_TARGET_V5
+            startup_v12 = (is158 and not is158_8106 and
+                           len(list(WIN_STARTUP_TARGET_V12.finditer(mm, lo, hi))) == 1)
+            startup_v11 = is158 and not is158_8106 and not startup_v12
+            startup_rx = (WIN_STARTUP_V12 if startup_v12 else WIN_STARTUP_V11 if startup_v11
+                          else WIN_STARTUP_V6 if (is155 or is158_8106) else WIN_STARTUP_V5)
+            target_rx = (WIN_STARTUP_TARGET_V12 if startup_v12 else WIN_STARTUP_TARGET_V11 if startup_v11
+                         else WIN_STARTUP_TARGET_V6 if (is155 or is158_8106) else WIN_STARTUP_TARGET_V5)
             startups = list(startup_rx.finditer(mm, lo, hi))
             if len(startups) != 1:
                 rejects.append(("W6", splits[0].start(), f"{family}: expected one startup-disable branch, found {len(startups)}"))
@@ -806,6 +837,149 @@ def dump(mm, segs, off, before, after, title):
         for ins in CS.disasm(data, base):
             print(f"  {ins.address:#x}: {ins.mnemonic:<6} {ins.op_str}")
     print()
+
+
+def semantic_discover(mm, segs, sites, rejects):
+    """Disassemble unknown builds and report likely MV2 gates by instruction meaning.
+
+    This is intentionally diagnostic-only: semantic candidates are never patched
+    until a profile's full control-flow paths have been independently validated.
+    """
+    print("=== Semantic candidates (diagnostic only; never patched automatically) ===")
+    if CS is None:
+        print("Capstone is not installed. Install requirements.txt to enable instruction-level discovery.\n")
+        return
+
+    x86 = CAPSTONE_X86
+    # Suppress only the branch bytes themselves. A validated regex window can
+    # span several hundred bytes and overlap a distinct nearby MV2 gate.
+    known = [(site.jpos - 8, site.jpos + len(site.orig) + 8) for site in sites]
+    # Rejected signatures are precisely the candidates that most need semantic
+    # context. Hiding their whole neighborhood made discovery omit the reason
+    # for a structure mismatch, so only validated sites are suppressed here.
+    rejected = [(off, kind, reason) for kind, off, reason in rejects]
+
+    def already_classified(off):
+        return any(lo <= off < hi for lo, hi in known)
+
+    candidates = []
+    for seg in segs:
+        # Avoid holding another full Chromium image in memory: decode executable
+        # segments in 1 MiB windows with a short overlap for instructions crossing
+        # a window boundary. Duplicate addresses are discarded below.
+        cursor = seg.off
+        limit = seg.off + seg.filesz
+        while cursor < limit:
+            end = min(cursor + (1 << 20), limit)
+            data = bytes(mm[cursor:min(end + 15, limit)])
+            base = seg.vaddr + cursor - seg.off
+            for ins in CS.disasm(data, base):
+                off = cursor + ins.address - base
+                if off >= end or already_classified(off) or ins.mnemonic != "cmp" or len(ins.operands) != 2:
+                    continue
+                left, right = ins.operands
+                if (left.type != x86.X86_OP_MEM or left.mem.disp != 0x50 or
+                        right.type != x86.X86_OP_IMM or right.imm != 2):
+                    continue
+                # This compare should control a conditional branch. Permit one
+                # harmless nop so compiler padding does not hide the candidate.
+                following = [item for item in CS.disasm(bytes(mm[off + ins.size:min(off + ins.size + 16, limit)]),
+                                                         ins.address + ins.size)]
+                branch = next((item for item in following[:2]
+                               if item.mnemonic.startswith("j") and item.mnemonic != "jmp"), None)
+                if branch is None:
+                    continue
+                window_end = min(off + 320, limit)
+                window = bytes(mm[off:window_end])
+                memory_offsets = set()
+                immediates = set()
+                for item in CS.disasm(window, ins.address):
+                    for operand in item.operands:
+                        if operand.type == x86.X86_OP_MEM and operand.mem.disp:
+                            memory_offsets.add(operand.mem.disp & 0xffffffff)
+                        elif operand.type == x86.X86_OP_IMM:
+                            immediates.add(operand.imm & 0xffffffff)
+                landmarks = []
+                for value, label in ((0x208, "flag+0x208"), (0x228, "extension+0x228"),
+                                     (0x88, "type+0x88")):
+                    if value in memory_offsets:
+                        landmarks.append(label)
+                if 0x10a in immediates:
+                    landmarks.append("type-mask 0x10A")
+                if not landmarks:
+                    continue
+                target = next((op.imm for op in branch.operands if op.type == x86.X86_OP_IMM), None)
+                fallthrough = branch.address + branch.size
+                candidates.append((off, ins, branch, target, fallthrough, landmarks, window))
+            cursor = end
+
+    # The linear sweep can lose instruction alignment in large optimized code
+    # sections. Re-decode rejected signature anchors directly: regex anchors
+    # start at known instruction boundaries and are useful seeds for diagnosis.
+    for off, _kind, _reason in rejected:
+        seg = next((item for item in segs if item.off <= off < item.off + item.filesz), None)
+        if seg is None:
+            continue
+        va = seg.vaddr + off - seg.off
+        window = bytes(mm[off:min(off + 320, seg.off + seg.filesz)])
+        decoded = list(CS.disasm(window, va))
+        if not decoded:
+            continue
+        ins = decoded[0]
+        if (ins.mnemonic != "cmp" or len(ins.operands) != 2 or
+                ins.operands[0].type != x86.X86_OP_MEM or ins.operands[0].mem.disp != 0x50 or
+                ins.operands[1].type != x86.X86_OP_IMM or ins.operands[1].imm != 2):
+            continue
+        branch = next((item for item in decoded[1:3]
+                       if item.mnemonic.startswith("j") and item.mnemonic != "jmp"), None)
+        if branch is None:
+            continue
+        memory_offsets, immediates = set(), set()
+        for item in decoded:
+            for operand in item.operands:
+                if operand.type == x86.X86_OP_MEM and operand.mem.disp:
+                    memory_offsets.add(operand.mem.disp & 0xffffffff)
+                elif operand.type == x86.X86_OP_IMM:
+                    immediates.add(operand.imm & 0xffffffff)
+        landmarks = [label for value, label in ((0x208, "flag+0x208"),
+                     (0x228, "extension+0x228"), (0x88, "type+0x88"))
+                     if value in memory_offsets]
+        if 0x10a in immediates:
+            landmarks.append("type-mask 0x10A")
+        if landmarks:
+            target = next((op.imm for op in branch.operands if op.type == x86.X86_OP_IMM), None)
+            candidates.append((off, ins, branch, target, branch.address + branch.size,
+                               landmarks, window))
+
+    # Capstone may return the same instruction in overlapping decode windows.
+    unique = {}
+    for row in candidates:
+        unique[row[0]] = row
+    rows = sorted(unique.values(), key=lambda row: row[0])
+    if not rows:
+        print("No unclassified manifest-version comparisons with MV2-related dataflow found.\n")
+        return
+
+    for index, (off, cmp_ins, branch, target, fallthrough, landmarks, window) in enumerate(rows[:20], 1):
+        va = cmp_ins.address
+        target_text = f"0x{target:X}" if target is not None else "indirect"
+        print(f"candidate #{index}: file_off=0x{off:X} vaddr=0x{va:X}; "
+              f"cmp [base+0x50],2; {branch.mnemonic} target={target_text}; "
+              f"fallthrough=0x{fallthrough:X}; landmarks={', '.join(landmarks)}")
+        nearby_rejects = [(kind, reason) for rejected_off, kind, reason in rejected
+                          if abs(rejected_off - off) <= 24]
+        for kind, reason in nearby_rejects:
+            print(f"  rejected [{kind}] at this candidate: {reason}")
+        shown = 0
+        for item in CS.disasm(window, va):
+            mark = "=>" if item.address == branch.address else "  "
+            print(f"  {mark} {item.address:#x}: {item.mnemonic:<7} {item.op_str}")
+            shown += 1
+            if shown >= 28:
+                break
+    if len(rows) > 20:
+        print(f"... {len(rows) - 20} additional semantic candidates omitted")
+    print("Semantic candidates are clues for profile development, not patch authorization.\n")
 
 
 def discover(mm, segs, sites):
@@ -872,9 +1046,10 @@ def analyze(path, verbose=True, with_discovery=True):
                 expected = {name: {k: values.get(k, 0) for k in sorted(kinds)}
                             for name, values in EXPECT_PROFILES.items()}
                 print(f"Profile not recognized; expected site counts: {expected}")
-            if with_discovery:
+            if with_discovery and (not ok_counts or rejects or "unknown" in states):
                 print()
                 discover(mm, segs, sites)
+                semantic_discover(mm, segs, sites, rejects)
         if not ok_counts or rejects or "unknown" in states:
             return None, "fail", [(s.jpos, s.orig, s.new, s.state) for s in sites]
         if states == {"patched"}:
@@ -984,6 +1159,81 @@ def ensure_chromium_stopped(path):
                 f"Chromium PID {entry} is still running from this file. Fully close the browser and retry.")
 
 
+def pending_patch_sites(sites):
+    """Return one patch per offset and reject conflicting overlapping plans."""
+    pending_by_offset = {}
+    for site in sites:
+        if site.state != "original" or site.orig == site.new:
+            continue
+        prior = pending_by_offset.get(site.jpos)
+        if prior is not None and (prior.orig != site.orig or prior.new != site.new):
+            raise SystemExit(
+                f"ABORTED: overlapping patch sites disagree at file offset 0x{site.jpos:X}.")
+        pending_by_offset[site.jpos] = site
+    return list(pending_by_offset.values())
+
+
+def write_patched_copy(source, destination, pending):
+    """Patch an isolated copy and require the normal analyzer to verify it."""
+    shutil.copy2(source, destination)
+    try:
+        with open(destination, "r+b") as f:
+            for site in pending:
+                f.seek(site.jpos)
+                if f.read(len(site.orig)) != site.orig:
+                    raise SystemExit(
+                        f"Test copy differs from expected bytes at 0x{site.jpos:X}; discarded.")
+                f.seek(site.jpos)
+                f.write(site.new)
+            f.flush()
+            os.fsync(f.fileno())
+        _, status, _ = analyze(destination, verbose=False, with_discovery=False)
+        if status != "patched":
+            raise SystemExit(f"Test patch self-check failed (status={status}); copy discarded.")
+    except BaseException:
+        if os.path.exists(destination):
+            os.remove(destination)
+        raise
+
+
+def cmd_test_apply(path, output=None):
+    """Patch a disposable copy; never write the source binary or its backup."""
+    check_size(path)
+    sites, status, _ = analyze(path, verbose=True, with_discovery=False)
+    if status not in ("original", "patched"):
+        raise SystemExit(
+            "\nTEST ABORTED: this build has no fully validated profile. No test copy was made. "
+            "Resolve the rejected or missing sites before trial patching.")
+    pending = pending_patch_sites(sites) if status == "original" else []
+
+    generated = output is None
+    if generated:
+        fd, output = tempfile.mkstemp(prefix="mv2ctl-test-",
+                                      suffix="-" + os.path.basename(path))
+        os.close(fd)
+        os.remove(output)
+    output = os.path.abspath(output)
+    if os.path.realpath(output) == os.path.realpath(path):
+        raise SystemExit("TEST ABORTED: output path resolves to the source binary.")
+    if os.path.lexists(output):
+        raise SystemExit("TEST ABORTED: output already exists; refusing to overwrite: " + output)
+    if not os.path.isdir(os.path.dirname(output)):
+        raise SystemExit("TEST ABORTED: output directory does not exist: " + os.path.dirname(output))
+
+    try:
+        write_patched_copy(path, output, pending)
+    except BaseException:
+        if generated and os.path.exists(output):
+            os.remove(output)
+        raise
+    if status == "patched":
+        print("Source was already patched; verified an unchanged test copy.")
+    else:
+        print(f"Applied {len(pending)} unique patch changes to the test copy.")
+    print("Verified test binary:", output)
+    print("Source binary and its backup were not modified.")
+
+
 def cmd_apply(path, assume_yes):
     check_size(path)
     ensure_chromium_stopped(path)
@@ -995,7 +1245,7 @@ def cmd_apply(path, assume_yes):
         raise SystemExit("\nAlready patched. No changes made.")
     if (not hasattr(os, "geteuid") or os.geteuid() != 0) and not os.access(os.path.dirname(path), os.W_OK):
         raise SystemExit("\nWrite access to the binary's directory is required; run with sudo.")
-    pending = [site for site in sites if site.state == "original" and site.orig != site.new]
+    pending = pending_patch_sites(sites)
     if not pending:
         raise SystemExit("No original bytes available to patch.")
     print(f"\nSites to be changed: {len(pending)} (out of {len(sites)} validated).")
@@ -1316,7 +1566,7 @@ def cmd_repair_profile(profile_dir, resources_path):
 
 
 def main():
-    if len(sys.argv) < 2 or sys.argv[1] not in ("analyze", "apply", "restore", "status", "repair-profile", "launch", "install-shortcut"):
+    if len(sys.argv) < 2 or sys.argv[1] not in ("analyze", "test-apply", "apply", "restore", "status", "repair-profile", "launch", "install-shortcut"):
         print(__doc__)
         raise SystemExit(1)
     cmd, rest = sys.argv[1], sys.argv[2:]
@@ -1358,6 +1608,27 @@ def main():
             browser_args = []
         cmd_launch(path, browser_args)
         return
+    if cmd == "test-apply":
+        output = None
+        binaries = []
+        index = 0
+        while index < len(rest):
+            if rest[index] == "--output":
+                if index + 1 >= len(rest) or output is not None:
+                    raise SystemExit("Usage: mv2ctl.py test-apply [BIN] [--output TEST_COPY]")
+                output = rest[index + 1]
+                index += 2
+            elif rest[index].startswith("-"):
+                raise SystemExit(f"Unknown test-apply option: {rest[index]}")
+            else:
+                binaries.append(rest[index])
+                index += 1
+        if len(binaries) > 1:
+            raise SystemExit("Usage: mv2ctl.py test-apply [BIN] [--output TEST_COPY]")
+        path = os.path.realpath(binaries[0]) if binaries else find_bin([])
+        cmd_test_apply(path, output)
+        return
+
     path = find_bin(rest)
     if cmd == "install-shortcut":
         cmd_install_shortcut(path)

@@ -14,9 +14,16 @@ def _byte_pattern(spec):
         for token in tokens
     ), re.DOTALL)
 
-EXPECT = {"A": 4, "B": 1, "C": 1, "D": 1, "S": 1, "U": 1}
+EXPECT = {"A": 4, "B": 1, "C": 1, "D": 1, "M": 1, "S": 1, "U": 1}
 EXPECT_PROFILES = {
     "Chromium 154-compatible ELF layout": EXPECT,
+    "Chromium distro ELF layout (alternate MustRemainDisabled call encoding)": {
+        "A": 4, "B": 1, "C": 1, "D": 0, "H": 1, "M": 1, "S": 0, "U": 1,
+    },
+    "Chromium distro ELF layout (ManifestV2Handler startup gates)": {
+        "A": 4, "B": 0, "C": 1, "D": 1, "H": 0, "I": 0, "M": 0,
+        "S": 0, "T": 1, "U": 0, "V": 0,
+    },
     "Google Chrome 155 / 156 Beta ELF layout": {"A": 2, "B": 0, "C": 0, "D": 1, "S": 1, "U": 1,
                                                  "M": 1, "I": 1, "V": 1, "H": 1},
     "Alacrium Browser 155-based ELF layout": {"A": 2, "B": 0, "C": 0, "D": 1, "S": 1, "U": 1,
@@ -50,7 +57,7 @@ EXPECT_PROFILES = {
         "M": 0, "I": 0, "V": 0, "H": 0,
         "W1": 2, "W2": 1, "W3": 1, "W4": 1, "W5": 0, "W5_157": 1, "W5_158": 0, "W6": 1,
     },
-    "Google Chrome for Testing 158.0.8113.0 Windows PE x86-64": {
+    "Google Chrome for Testing 158.0.8113.0 / 8116.0 Windows PE x86-64": {
         "A": 1, "B": 0, "C": 0, "D": 0, "S": 0, "U": 0,
         "M": 0, "I": 0, "V": 0, "H": 0,
         "W1": 2, "W2": 1, "W3": 1, "W4": 1, "W5": 0, "W5_157": 0, "W5_158": 1, "W6": 1,
@@ -325,6 +332,15 @@ WIN_STARTUP_TARGET_V11 = _byte_pattern(
     "BB 01 00 00 00 4C 8D 6C 24 38 4D 89 F7 B9 04 00 00 00 49 89 C6 E8 ?? ?? ?? ?? "
     "48 89 44 24 20 48 89 5C 24 30 C7 00 00 00 80 00 48 89 5C 24 28 "
     "4C 8D 40 04 48 89 F9 48 89 C2 E8 ?? ?? ?? ??")
+# Chrome for Testing 158.0.8116.0 uses the same startup-disable flow but
+# allocates its reason object through a different helper/register layout.
+WIN_STARTUP_V12 = _byte_pattern(
+    "48 8B 6C 24 40 4C 39 FD 0F 85 ?? ?? ?? ?? "
+    "48 8B 4C 24 48 E8 ?? ?? ?? ?? 48 8B 0D ?? ?? ?? ?? 48 8B 56 18")
+WIN_STARTUP_TARGET_V12 = _byte_pattern(
+    "BB 01 00 00 00 4C 8D 74 24 38 4D 89 FC B9 04 00 00 00 48 BA ?? ?? ?? ?? ?? ?? ?? ?? "
+    "49 89 C7 E8 ?? ?? ?? ?? 48 89 44 24 20 48 89 5C 24 30 C7 00 00 00 80 00 "
+    "48 89 5C 24 28 4C 8D 40 04 48 89 F9 48 89 C2 E8 ?? ?? ?? ??")
 R155_S = re.compile(
     rb"\xba\x00\x00\x80\x00\xe8....\x84\xc0\x74."
     rb"\x83\x7b\x50\x02(?P<j>\x7f.)"

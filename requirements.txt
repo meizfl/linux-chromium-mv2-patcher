@@ -1,0 +1,2 @@
+# Optional for instruction-level semantic diagnostics on unknown Chromium builds.
+capstone>=5.0,<6
