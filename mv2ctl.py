@@ -603,8 +603,13 @@ def find_sites(mm, segs):
         for m in RWIN_V2.finditer(mm, seg.off, seg.off + seg.filesz):
             jpos = m.start("j")
             # This scalar checker is covered by the more specific Windows
-            # integer-overload rule below; avoid writing the same byte twice.
-            if mm[:2] == b"MZ" and any(
+            # integer-overload rule below only in the older split-checker
+            # family. Newer Chromium PE layouts use this scalar checker as a
+            # standalone gate and have no W2 clone to patch in its place.
+            legacy_windows_splits = (mm[:2] == b"MZ" and any(
+                rx.search(mm, seg.off, seg.off + seg.filesz) is not None
+                for rx in (WIN_SPLIT_V5, WIN_SPLIT_V5_ALT, WIN_SPLIT_V7)))
+            if legacy_windows_splits and any(
                     candidate.start() + 5 == jpos
                     for candidate in WIN_INTEGER_SPLIT.finditer(mm, seg.off, seg.off + seg.filesz)):
                 continue

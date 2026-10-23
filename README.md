@@ -18,6 +18,7 @@ The binary rules in `mv2ctl.py` currently have independently validated ELF profi
 - Chrome 155 Windows x86-64 validates the full v7/v8 gate family and the resource-8129 unsupported-manifest path. An on-disk apply and post-write self-check completed on Chrome 155.0.8059.85 `chrome.dll`.
 - Google Chrome for Testing 157.0.8103.6 Windows x86-64 validates the same gate family with its distinct resource-8130 unsupported-manifest path. An on-disk apply and post-write self-check completed on the supplied `chrome.dll`.
 - Google Chrome for Testing 158.0.8113.0 and 158.0.8116.0 Windows x86-64 validate the changed extension-version filter, startup disable loop (including the 8116.0 reason-object layout), and resource-8244 unsupported-manifest path. An on-disk apply and post-write self-check completed on the supplied 8113.0 `chrome.dll`.
+- Chromium 158.0.8120.0 Windows x86-64 validates the standalone extension-overload and scalar `IsExtensionAffected` checks; both branches were applied and verified on a test copy.
 - Google Chrome for Testing 158.0.8106.0 Windows x86-64 validates the extension-overload checker, startup disable branch, and resource-8183 (`0x1FF7`) unsupported-manifest path.
 - Google Chrome for Testing 156.0.8078.48 Windows x86-64 validates the same gate family with its resource-8122 (`0x1FBA`) `UserMayInstall` path.
 

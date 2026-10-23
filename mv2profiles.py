@@ -40,7 +40,7 @@ EXPECT_PROFILES = {
     },
     "Chromium 158 centralized MV2 policy x86-64": {"A": 0, "B": 0, "C": 0, "D": 0, "S": 0,
                                                  "U": 0, "M": 0, "I": 0, "V": 2, "H": 1},
-    "Chromium 158 Windows PE x86-64": {"A": 0, "B": 0, "C": 0, "D": 0, "S": 0,
+    "Chromium 158.0.8120.0 Windows PE x86-64": {"A": 0, "B": 0, "C": 0, "D": 0, "S": 0,
                                        "U": 0, "M": 0, "I": 0, "V": 2, "H": 0},
     "Google Chrome 152.0.7977.65 Windows PE x86-64": {
         "A": 0, "B": 0, "C": 0, "D": 0, "S": 0, "U": 0,
