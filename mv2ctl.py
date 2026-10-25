@@ -85,6 +85,7 @@ from mv2profiles import (
     WIN_INSTALL_V11_ERROR,
     WIN_INSTALL_V12_ERROR,
     WIN_INSTALL_V13_ERROR,
+    WIN_INSTALL_V14_ERROR,
     WIN_INSTALL_V8_TYPES,
     WIN_EXTENSION_FILTER_V11,
     WIN_STARTUP_V5,
@@ -683,7 +684,8 @@ def find_sites(mm, segs):
             lo, hi = seg.off, seg.off + seg.filesz
             is158_8106 = WIN_INSTALL_V12_ERROR.search(mm, lo, hi) is not None
             is158 = (is158_8106 or
-                     WIN_INSTALL_V11_ERROR.search(mm, lo, hi) is not None)
+                     WIN_INSTALL_V11_ERROR.search(mm, lo, hi) is not None or
+                     WIN_INSTALL_V14_ERROR.search(mm, lo, hi) is not None)
             split7 = list(WIN_SPLIT_V7.finditer(mm, lo, hi))
             split5 = sorted(
                 [*WIN_SPLIT_V5.finditer(mm, lo, hi), *WIN_SPLIT_V5_ALT.finditer(mm, lo, hi)],
@@ -776,6 +778,7 @@ def find_sites(mm, segs):
                         (WIN_INSTALL_V11_ERROR, "Chrome 158"),
                         (WIN_INSTALL_V12_ERROR, "Chrome 158.0.8106"),
                         (WIN_INSTALL_V13_ERROR, "Chrome 156.0.8078.48"),
+                        (WIN_INSTALL_V14_ERROR, "Chrome 158.0.8117.2"),
                     )
                     validated_error = next(
                         (label for error_rx, label in error_profiles
@@ -791,6 +794,7 @@ def find_sites(mm, segs):
                     install_kind = {
                         "Chrome 157": "W5_157",
                         "Chrome 158": "W5_158",
+                        "Chrome 158.0.8117.2": "W5_158",
                         "Chrome 158.0.8106": "W5_158_8106",
                         "Chrome 156.0.8078.48": "W5_156",
                     }.get(install_label, "W5")
