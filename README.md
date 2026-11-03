@@ -106,3 +106,131 @@ The profile command edits only the MV2 disable bit (`0x800000`), preserves other
 The Windows build's in-memory `chrome.dll` patcher, process-memory verification/reuse, consent-bound restart of unrelated browser sessions, and WinUI-specific update installer do not have a direct Linux equivalent in this port. This Linux build follows the project's disk-patch workflow: it validates the ELF binary, atomically installs verified edits, then launches through Chromium normally. It does not terminate or rewrite an already-running process. Profile repair is available as a separate explicit action.
 
 The Windows release feed currently publishes a Windows GUI ZIP; it does not provide a Linux application asset, so the Windows self-updater has no Linux package to install. The Linux source remains directly runnable with the system Python and GTK 4. A functional MV2 extension check should be performed manually with the installed browser version after patching; do not infer compatibility for an unrecognized build.
+
+## Scheduled browser builds (`mv2build.py`)
+
+`mv2build.py` is a separate, non-interactive Linux build script. It resolves the latest
+upstream releases, downloads and extracts them without running installers, calls
+`mv2ctl.py test-apply`, verifies the patched copy, and publishes a `.tar.zst` only
+after successful verification. It never patches an installed browser.
+
+Requirements: Python **3.12+**, GNU `tar`, `zstd`; additionally `7z` and `bsdtar`
+for regular Windows Chrome, and `bsdtar` for Arch package metadata. On Arch these
+commands are supplied by `tar`, `zstd`, `7zip`, and `libarchive`. On Debian/Ubuntu,
+install `tar`, `zstd`, `7zip` (or `p7zip-full`), and `libarchive-tools`.
+Keep several GB free for temporary files; targets build sequentially and temporary
+files are removed after each target unless `--keep-work` is set.
+
+```sh
+# Build every target; output defaults to builds/ beside the script.
+python3 ./mv2build.py
+
+# Inspect available targets or current upstream versions without downloading browsers.
+python3 ./mv2build.py --list
+python3 ./mv2build.py --dry-run
+
+# Select one or several targets.
+python3 ./mv2build.py \
+  --target chrome-linux-canary \
+  --target chromium-arch \
+  --target chrome-testing-win64-stable \
+  --output /srv/browser-builds
+```
+
+Default targets and archive names:
+
+| Builds | Target names | Archive names |
+| --- | --- | --- |
+| Chrome Linux x64, Stable/Beta/Dev/Canary | `chrome-linux-{channel}` | `chrome-{channel}-{version}.tar.zst` |
+| Chrome Windows x64, Stable/Beta/Dev | `chrome-win64-{channel}` | `chrome-win64-{version}-{channel}.tar.zst` |
+| Chrome for Testing Linux x64, all four channels | `chrome-testing-linux-{channel}` | `chrome-{channel}-{version}-testing.tar.zst` |
+| Chrome for Testing Windows x64, all four channels | `chrome-testing-win64-{channel}` | `chrome-win64-{version}-{channel}-testing.tar.zst` |
+| Arch Chromium, newest version from extra/extra-testing | `chromium-arch` | Original name, e.g. `chromium-156.0.8078.79-1-x86_64.pkg.tar.zst` |
+| Chromium snapshot Linux x64, latest completed revision | `chromium-snapshot-linux` | `chromium-snapshot-{version}-r{revision}.tar.zst` |
+
+For example: `chrome-canary-159.0.8139.2.tar.zst` and
+`chrome-win64-156.0.8078.80-stable-testing.tar.zst`. Windows Testing builds are
+included alongside the requested Linux Testing channels. Testing archives have
+an explicit suffix to avoid collisions with regular Chrome. Snapshot names
+include the revision because several snapshots can share the same browser version.
+
+Chrome Linux downloads come from Google's amd64 DEB repository (Dev is named
+`google-chrome-unstable` upstream). Windows Chrome uses the full x64 installer
+from Google's Omaha update service. Testing builds use the official
+[Chrome for Testing JSON API](https://github.com/GoogleChromeLabs/chrome-for-testing#json-api-endpoints).
+Snapshots use `LAST_CHANGE`, `REVISIONS`, and the exact commit's `chrome/VERSION`
+from the [official snapshot source](https://www.chromium.org/getting-involved/download-chromium/).
+Arch compares numeric package versions, releases, and epochs across both
+repositories; a missing extra-testing package is normal. Other repository errors
+fail the target rather than silently assuming extra is newer. Arch mirror metadata
+must match the selected package before downloading it.
+
+Google DEB, Omaha installer, and Arch downloads are checked against upstream
+SHA256 metadata. Testing/snapshot feeds do not supply SHA256 checksums; these
+use HTTPS, ZIP CRC validation, and the patcher's binary verification. Each output
+gets a `.json` sidecar recording the source URL/version, source and output hashes,
+and the builder/patcher fingerprint. A repeat run skips output only when the
+metadata, code fingerprint, and archive checksum match. Use `--force` to rebuild.
+Replacing an existing archive happens only after a new verified archive is ready.
+
+Linux archives contain the complete browser directory, including resources and
+helper programs. Extract and run `chrome` from it; they use the host's system
+libraries. Windows archives retain `chrome.exe`, `chrome.dll`, and the rest of
+the browser payload. Arch output retains `.PKGINFO`, `.BUILDINFO`, dependencies,
+links and package layout, and regenerates `.MTREE` with the patched file hashes
+and root ownership. The modified Arch package is unsigned; the upstream package
+signature no longer applies. Install it according to your local pacman package
+signature policy or sign it with your own trusted key.
+
+Unknown or incompatible binary layouts **fail closed**. Automatic downloading does
+not add patch profiles for new browser versions. Failed targets produce no new
+archive, log their patch analysis in `builds/logs/`, and do not stop other targets.
+The script exits with status **1** if any target failed, **0** otherwise (including
+when everything was already built). `--keep-work` preserves downloads/extracted
+files for diagnostics; `--work-dir /path` selects a filesystem with enough space.
+The output-directory lock prevents overlapping scheduled runs using that directory.
+
+For an unattended run approximately every two days, use a systemd user timer.
+Replace the paths below with your absolute checkout and output paths. Do not use
+root: downloads and packaging do not require it.
+
+`~/.config/systemd/user/mv2build.service`:
+
+```ini
+[Unit]
+Description=Download and build patched Chrome/Chromium packages
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /absolute/path/linux-chromium-mv2-patcher/mv2build.py --output /absolute/path/browser-builds
+```
+
+`~/.config/systemd/user/mv2build.timer`:
+
+```ini
+[Unit]
+Description=Build patched browsers every two days
+
+[Timer]
+OnStartupSec=5min
+OnUnitActiveSec=2d
+
+[Install]
+WantedBy=timers.target
+```
+
+```sh
+systemctl --user daemon-reload
+systemctl --user enable --now mv2build.timer
+journalctl --user -u mv2build.service
+```
+
+The user timer runs while the user's systemd manager is active; a server can use
+the same service/timer as system units with an explicit unprivileged `User=`.
+This repository does not install or enable a timer automatically.
+
+Builder regression checks:
+
+```sh
+python3 -m unittest discover -s tests -v
+```
