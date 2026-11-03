@@ -86,16 +86,19 @@ from mv2profiles import (
     WIN_INSTALL_V12_ERROR,
     WIN_INSTALL_V13_ERROR,
     WIN_INSTALL_V14_ERROR,
+    WIN_INSTALL_V15_ERROR,
     WIN_INSTALL_V8_TYPES,
     WIN_EXTENSION_FILTER_V11,
     WIN_STARTUP_V5,
     WIN_STARTUP_V6,
     WIN_STARTUP_V11,
     WIN_STARTUP_V12,
+    WIN_STARTUP_V13,
     WIN_STARTUP_TARGET_V5,
     WIN_STARTUP_TARGET_V6,
     WIN_STARTUP_TARGET_V11,
     WIN_STARTUP_TARGET_V12,
+    WIN_STARTUP_TARGET_V13,
 )
 
 try:
@@ -685,7 +688,9 @@ def find_sites(mm, segs):
             is158_8106 = WIN_INSTALL_V12_ERROR.search(mm, lo, hi) is not None
             is158 = (is158_8106 or
                      WIN_INSTALL_V11_ERROR.search(mm, lo, hi) is not None or
-                     WIN_INSTALL_V14_ERROR.search(mm, lo, hi) is not None)
+                     WIN_INSTALL_V14_ERROR.search(mm, lo, hi) is not None or
+                     WIN_INSTALL_V15_ERROR.search(mm, lo, hi) is not None)
+            is159 = WIN_INSTALL_V15_ERROR.search(mm, lo, hi) is not None
             split7 = list(WIN_SPLIT_V7.finditer(mm, lo, hi))
             split5 = sorted(
                 [*WIN_SPLIT_V5.finditer(mm, lo, hi), *WIN_SPLIT_V5_ALT.finditer(mm, lo, hi)],
@@ -693,7 +698,7 @@ def find_sites(mm, segs):
             if not split7 and not split5:
                 continue
             is155 = bool(split7)
-            family = "Chrome 158" if is158 else "Chrome 155" if is155 else "Chrome 152"
+            family = "Chrome 159" if is159 else "Chrome 158" if is158 else "Chrome 155" if is155 else "Chrome 152"
             splits = split7 if is155 else split5
             if is158 and not is158_8106:
                 filters = list(WIN_EXTENSION_FILTER_V11.finditer(mm, lo, hi))
@@ -778,6 +783,7 @@ def find_sites(mm, segs):
                         (WIN_INSTALL_V11_ERROR, "Chrome 158"),
                         (WIN_INSTALL_V12_ERROR, "Chrome 158.0.8106"),
                         (WIN_INSTALL_V13_ERROR, "Chrome 156.0.8078.48"),
+                        (WIN_INSTALL_V15_ERROR, "Chrome 159.0.8130.0"),
                         (WIN_INSTALL_V14_ERROR, "Chrome 158.0.8117.2"),
                     )
                     validated_error = next(
@@ -795,18 +801,21 @@ def find_sites(mm, segs):
                         "Chrome 157": "W5_157",
                         "Chrome 158": "W5_158",
                         "Chrome 158.0.8117.2": "W5_158",
+                        "Chrome 159.0.8130.0": "W5_159",
                         "Chrome 158.0.8106": "W5_158_8106",
                         "Chrome 156.0.8078.48": "W5_156",
                     }.get(install_label, "W5")
                     sites.append(Site(install_kind, m.start(), m.end(), j, b"\x7f", b"\xeb", state,
                                       f"{install_label} UserMayInstall clone"))
 
-            startup_v12 = (is158 and not is158_8106 and
+            startup_v13 = (is159 and
+                           len(list(WIN_STARTUP_TARGET_V13.finditer(mm, lo, hi))) == 1)
+            startup_v12 = (not startup_v13 and is158 and not is158_8106 and
                            len(list(WIN_STARTUP_TARGET_V12.finditer(mm, lo, hi))) == 1)
-            startup_v11 = is158 and not is158_8106 and not startup_v12
-            startup_rx = (WIN_STARTUP_V12 if startup_v12 else WIN_STARTUP_V11 if startup_v11
+            startup_v11 = is158 and not is158_8106 and not startup_v12 and not startup_v13
+            startup_rx = (WIN_STARTUP_V13 if startup_v13 else WIN_STARTUP_V12 if startup_v12 else WIN_STARTUP_V11 if startup_v11
                           else WIN_STARTUP_V6 if (is155 or is158_8106) else WIN_STARTUP_V5)
-            target_rx = (WIN_STARTUP_TARGET_V12 if startup_v12 else WIN_STARTUP_TARGET_V11 if startup_v11
+            target_rx = (WIN_STARTUP_TARGET_V13 if startup_v13 else WIN_STARTUP_TARGET_V12 if startup_v12 else WIN_STARTUP_TARGET_V11 if startup_v11
                          else WIN_STARTUP_TARGET_V6 if (is155 or is158_8106) else WIN_STARTUP_TARGET_V5)
             startups = list(startup_rx.finditer(mm, lo, hi))
             if len(startups) != 1:

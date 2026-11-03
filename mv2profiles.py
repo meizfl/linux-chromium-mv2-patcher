@@ -62,6 +62,12 @@ EXPECT_PROFILES = {
         "M": 0, "I": 0, "V": 0, "H": 0,
         "W1": 2, "W2": 1, "W3": 1, "W4": 1, "W5": 0, "W5_157": 0, "W5_158": 1, "W6": 1,
     },
+    "Chrome 159.0.8130.0 Windows PE x86-64": {
+        "A": 1, "B": 0, "C": 0, "D": 0, "S": 0, "U": 0,
+        "M": 0, "I": 0, "V": 0, "H": 0,
+        "W1": 2, "W2": 1, "W3": 1, "W4": 1, "W5": 0,
+        "W5_157": 0, "W5_158": 0, "W5_159": 1, "W6": 1,
+    },
     "Google Chrome for Testing 158.0.8106.0 Windows PE x86-64": {
         "A": 1, "B": 0, "C": 0, "D": 0, "S": 0, "U": 0,
         "M": 0, "I": 0, "V": 0, "H": 0,
@@ -310,6 +316,9 @@ WIN_INSTALL_V13_ERROR = _byte_pattern(
 WIN_INSTALL_V14_ERROR = _byte_pattern(
     "4C 8D B4 24 50 02 00 00 4C 89 F1 BA 3F 20 00 00 E8 ?? ?? ?? ?? "
     "48 8D 4C 24 60 C6 41 F8 00 48 8D 5C 24 58 E9 ?? ?? ?? ??")
+WIN_INSTALL_V15_ERROR = _byte_pattern(
+    "4C 8D B4 24 50 02 00 00 4C 89 F1 BA 8B 20 00 00 E8 ?? ?? ?? ?? "
+    "48 8D 4C 24 60 C6 41 F8 00 48 8D 5C 24 58 E9 ?? ?? ?? ??")
 WIN_INSTALL_V8_TYPES = _byte_pattern(
     "83 F9 08 0F 84 ?? ?? ?? ?? 83 F9 03 0F 85 ?? ?? ?? ?? E9 ?? ?? ?? ??")
 WIN_STARTUP_V5 = _byte_pattern(
@@ -344,6 +353,13 @@ WIN_STARTUP_TARGET_V12 = _byte_pattern(
     "BB 01 00 00 00 4C 8D 74 24 38 4D 89 FC B9 04 00 00 00 48 BA ?? ?? ?? ?? ?? ?? ?? ?? "
     "49 89 C7 E8 ?? ?? ?? ?? 48 89 44 24 20 48 89 5C 24 30 C7 00 00 00 80 00 "
     "48 89 5C 24 28 4C 8D 40 04 48 89 F9 48 89 C2 E8 ?? ?? ?? ??")
+WIN_STARTUP_V13 = _byte_pattern(
+    "48 8B 6C 24 48 4C 39 F5 0F 85 ?? ?? ?? ?? "
+    "48 8B 4C 24 50 E8 ?? ?? ?? ?? 48 8B 0D ?? ?? ?? ?? 48 8B 56 18")
+WIN_STARTUP_TARGET_V13 = _byte_pattern(
+    "BB 01 00 00 00 4C 8D 6C 24 40 4D 89 F7 B9 04 00 00 00 49 89 C6 E8 ?? ?? ?? ?? "
+    "48 89 44 24 28 48 89 5C 24 38 C7 00 00 00 80 00 48 89 5C 24 30 "
+    "4C 8D 40 04 48 89 F9 48 89 C2 E8 ?? ?? ?? ??")
 R155_S = re.compile(
     rb"\xba\x00\x00\x80\x00\xe8....\x84\xc0\x74."
     rb"\x83\x7b\x50\x02(?P<j>\x7f.)"
