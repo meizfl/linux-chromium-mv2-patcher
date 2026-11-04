@@ -87,6 +87,8 @@ from mv2profiles import (
     WIN_INSTALL_V13_ERROR,
     WIN_INSTALL_V14_ERROR,
     WIN_INSTALL_V15_ERROR,
+    WIN_INSTALL_V16_ERROR,
+    WIN_INSTALL_V17_ERROR,
     WIN_INSTALL_V8_TYPES,
     WIN_EXTENSION_FILTER_V11,
     WIN_STARTUP_V5,
@@ -686,11 +688,12 @@ def find_sites(mm, segs):
         for seg in segs:
             lo, hi = seg.off, seg.off + seg.filesz
             is158_8106 = WIN_INSTALL_V12_ERROR.search(mm, lo, hi) is not None
-            is158 = (is158_8106 or
+            is158_8127 = WIN_INSTALL_V16_ERROR.search(mm, lo, hi) is not None
+            is159 = (WIN_INSTALL_V15_ERROR.search(mm, lo, hi) is not None or
+                     WIN_INSTALL_V17_ERROR.search(mm, lo, hi) is not None)
+            is158 = (is158_8106 or is158_8127 or is159 or
                      WIN_INSTALL_V11_ERROR.search(mm, lo, hi) is not None or
-                     WIN_INSTALL_V14_ERROR.search(mm, lo, hi) is not None or
-                     WIN_INSTALL_V15_ERROR.search(mm, lo, hi) is not None)
-            is159 = WIN_INSTALL_V15_ERROR.search(mm, lo, hi) is not None
+                     WIN_INSTALL_V14_ERROR.search(mm, lo, hi) is not None)
             split7 = list(WIN_SPLIT_V7.finditer(mm, lo, hi))
             split5 = sorted(
                 [*WIN_SPLIT_V5.finditer(mm, lo, hi), *WIN_SPLIT_V5_ALT.finditer(mm, lo, hi)],
@@ -785,6 +788,8 @@ def find_sites(mm, segs):
                         (WIN_INSTALL_V13_ERROR, "Chrome 156.0.8078.48"),
                         (WIN_INSTALL_V15_ERROR, "Chrome 159.0.8130.0"),
                         (WIN_INSTALL_V14_ERROR, "Chrome 158.0.8117.2"),
+                        (WIN_INSTALL_V16_ERROR, "Chrome Beta 158.0.8127.2"),
+                        (WIN_INSTALL_V17_ERROR, "Chrome for Testing Canary 159.0.8141.0"),
                     )
                     validated_error = next(
                         (label for error_rx, label in error_profiles
@@ -801,14 +806,16 @@ def find_sites(mm, segs):
                         "Chrome 157": "W5_157",
                         "Chrome 158": "W5_158",
                         "Chrome 158.0.8117.2": "W5_158",
+                        "Chrome Beta 158.0.8127.2": "W5_158_8127",
                         "Chrome 159.0.8130.0": "W5_159",
+                        "Chrome for Testing Canary 159.0.8141.0": "W5_159_8141",
                         "Chrome 158.0.8106": "W5_158_8106",
                         "Chrome 156.0.8078.48": "W5_156",
                     }.get(install_label, "W5")
                     sites.append(Site(install_kind, m.start(), m.end(), j, b"\x7f", b"\xeb", state,
                                       f"{install_label} UserMayInstall clone"))
 
-            startup_v13 = (is159 and
+            startup_v13 = ((is159 or is158_8127) and
                            len(list(WIN_STARTUP_TARGET_V13.finditer(mm, lo, hi))) == 1)
             startup_v12 = (not startup_v13 and is158 and not is158_8106 and
                            len(list(WIN_STARTUP_TARGET_V12.finditer(mm, lo, hi))) == 1)

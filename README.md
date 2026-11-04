@@ -22,6 +22,8 @@ The binary rules in `mv2ctl.py` currently have independently validated ELF profi
 - Chromium 158.0.8120.0 Windows x86-64 validates the standalone extension-overload and scalar `IsExtensionAffected` checks; both branches were applied and verified on a test copy.
 - Google Chrome for Testing 158.0.8106.0 Windows x86-64 validates the extension-overload checker, startup disable branch, and resource-8183 (`0x1FF7`) unsupported-manifest path.
 - Google Chrome for Testing 156.0.8078.48 Windows x86-64 validates the same gate family with its resource-8122 (`0x1FBA`) `UserMayInstall` path.
+- Google Chrome Beta 158.0.8127.2 Windows x86-64 validates the full eight-site gate family, including the resource-8302 (`0x206E`) `UserMayInstall` path and the startup disable loop layout also used by Chrome 159. Its exact upstream `chrome.dll` passed copy-patching and post-write analysis. Regression fixtures cover the original and patched layouts and reject changed policy, cleanup, startup, and disable-reason paths.
+- Google Chrome for Testing Canary 159.0.8141.0 Windows x86-64 validates all eight patch sites with its resource-8332 (`0x208C`) install-error path and V11 startup-disable loop. Chrome for Testing Dev 159.0.8130.0 uses the existing Chrome 159 profile with resource 8331 and the V13 startup loop. Both exact upstream DLLs have regression fixtures covering successful patch verification and rejection of changed branch destinations or disable reasons.
 
 `ContentHash::ShouldComputeHashesForResource` is never patched: for signed hashes it intentionally selects only resources with a signed tree-hash root. If an older patch changed this gate, analysis rejects the binary; restore from its verified `.mv2orig` and apply the current patcher again.
 
