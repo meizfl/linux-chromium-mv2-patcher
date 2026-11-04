@@ -376,15 +376,32 @@ def refresh_mtree(root):
         out.write(gzip.compress(mtree, mtime=0))
 
 
+def verify_arch_package(path):
+    names = run(['bsdtar', '-tf', path]).decode().splitlines()
+    for required in ('.PKGINFO', '.MTREE'):
+        if names.count(required) != 1:
+            raise BuildError(f'Arch archive must contain exactly one root {required}, without ./ prefix')
+    if any(name.startswith('./') for name in names):
+        raise BuildError('Arch archive contains ./-prefixed paths')
+    if shutil.which('pacman'):
+        # Read package metadata through libalpm; this does not install anything.
+        run(['pacman', '-Qip', path])
+
+
 def pack(root, destination, arch=False):
     # GNU tar preserves executable modes and links. Arch packages keep metadata at root.
     argv = ['tar', '--zstd', '--numeric-owner', '--owner=0', '--group=0', '-cf', str(destination)]
     if arch:
-        argv += ['-C', str(root), '.']
+        # libalpm requires the literal name .PKGINFO, not ./.PKGINFO.
+        # Explicit root entries avoid tar's ./ prefix for every package path.
+        entries = ['.PKGINFO', *sorted(p.name for p in root.iterdir() if p.name != '.PKGINFO')]
+        argv += ['-C', str(root), '--', *entries]
     else:
         argv += ['-C', str(root.parent), root.name]
     run(argv)
     run(['zstd', '-t', '-q', destination])
+    if arch:
+        verify_arch_package(destination)
 
 
 def builder_fingerprint():

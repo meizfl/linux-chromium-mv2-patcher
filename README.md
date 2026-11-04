@@ -180,7 +180,10 @@ helper programs. Extract and run `chrome` from it; they use the host's system
 libraries. Windows archives retain `chrome.exe`, `chrome.dll`, and the rest of
 the browser payload. Arch output retains `.PKGINFO`, `.BUILDINFO`, dependencies,
 links and package layout, and regenerates `.MTREE` with the patched file hashes
-and root ownership. The modified Arch package is unsigned; the upstream package
+and root ownership. Arch archives store literal root metadata names (`.PKGINFO`,
+`.MTREE`) without a `./` prefix, as required by pacman/libalpm. The builder checks
+this layout before publishing and also runs read-only `pacman -Qip` when pacman
+is available. The modified Arch package is unsigned; the upstream package
 signature no longer applies. Install it according to your local pacman package
 signature policy or sign it with your own trusted key.
 
