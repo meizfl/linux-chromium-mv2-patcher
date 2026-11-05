@@ -36,6 +36,8 @@ TARGETS = (tuple(f'chrome-linux-{c}' for c in CHANNELS)
            + tuple(f'chrome-win64-{c}' for c in CHANNELS[:3])
            + tuple(f'chrome-testing-{p}-{c}' for p in ('linux', 'win64') for c in CHANNELS)
            + ('chromium-arch', 'chromium-snapshot-linux'))
+DEFAULT_TARGETS = TARGETS
+TARGETS += ('chromium-universal', 'chromium-universal-glibc')
 GOOGLE_DEB = 'https://dl.google.com/linux/chrome/deb/'
 CFT = 'https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json'
 SNAPSHOTS = 'https://storage.googleapis.com/chromium-browser-snapshots/Linux_x64/'
@@ -222,11 +224,13 @@ def run(argv, **kwargs):
     return result.stdout
 
 
-def extract_tar(source, destination, browser_only=False):
+def extract_tar(source, destination, browser_only=False, selector=None):
     with tarfile.open(source, 'r:*') as archive:
         # Reject absolute paths as well as traversal; data_filter checks symlink targets,
         # hard links, special files, and permissions at extraction time.
         def filter_member(member, path):
+            if selector is not None and not selector(member):
+                return None
             if PurePosixPath(member.name).is_absolute():
                 raise BuildError(f'Absolute archive path: {member.name}')
             if browser_only:
@@ -268,7 +272,7 @@ def extract_zip(source, destination):
                 path.chmod(0o755)
 
 
-def extract_deb(source, destination, work):
+def extract_deb(source, destination, work, browser_only=True, selector=None):
     # Read the ar envelope ourselves; no dpkg installation or maintainer scripts.
     with open(source, 'rb') as stream:
         if stream.read(8) != b'!<arch>\n':
@@ -294,7 +298,7 @@ def extract_deb(source, destination, work):
                     payload = unpacked
                 # System integration files include absolute symlinks and cron jobs;
                 # only the self-contained /opt/google/chrome* payload is needed.
-                extract_tar(payload, destination, browser_only=True)
+                extract_tar(payload, destination, browser_only=browser_only, selector=selector)
                 return
             stream.seek(size + size % 2, 1)
     raise BuildError('Debian archive has no data.tar payload')
@@ -406,7 +410,7 @@ def pack(root, destination, arch=False):
 
 def builder_fingerprint():
     digest = hashlib.sha256()
-    for name in ('mv2build.py', 'mv2ctl.py', 'mv2profiles.py'):
+    for name in ('mv2build.py', 'mv2ctl.py', 'mv2profiles.py', 'mv2universal.py', 'mv2glibc.py'):
         digest.update((HERE / name).read_bytes())
     return digest.hexdigest()
 
@@ -474,19 +478,32 @@ def main(argv=None):
     parser.add_argument('--work-dir', type=Path, help='Temporary extraction directory (default: system temporary directory)')
     parser.add_argument('--keep-work', action='store_true', help='Keep downloaded/extracted files for diagnostics')
     parser.add_argument('--force', action='store_true', help='Rebuild even if verified output already exists')
+    parser.add_argument('--chromium-universal', action='store_true',
+                        help='Build Arch, DEB and RPM packages from the latest Debian 12 Chromium; alone selects only this target')
+    parser.add_argument('--chromium-universal-glibc', action='store_true',
+                        help='Opt-in Arch/DEB/RPM variant with private glibc, ld-linux, libgcc and libstdc++; excluded from default builds')
     args = parser.parse_args(argv)
     if args.list:
         print('\n'.join(TARGETS))
         return 0
     if sys.version_info < (3, 12):
         parser.error('mv2build requires Python 3.12+ (safe tar extraction)')
-    selected = list(dict.fromkeys(args.target or TARGETS))
+    explicit_universal = args.chromium_universal or args.chromium_universal_glibc
+    selected = list(dict.fromkeys(args.target or ([] if explicit_universal else DEFAULT_TARGETS)))
+    if args.chromium_universal and 'chromium-universal' not in selected:
+        selected.append('chromium-universal')
+    if args.chromium_universal_glibc and 'chromium-universal-glibc' not in selected:
+        selected.append('chromium-universal-glibc')
     if not args.dry_run:
         needed = ['tar', 'zstd']
-        if 'chromium-arch' in selected or any(t.startswith('chrome-win64-') for t in selected):
+        if any(t in selected for t in ('chromium-arch', 'chromium-universal', 'chromium-universal-glibc')) or any(t.startswith('chrome-win64-') for t in selected):
             needed.append('bsdtar')
         if any(t.startswith('chrome-win64-') for t in selected):
             needed.append('7z')
+        if any(t in selected for t in ('chromium-universal', 'chromium-universal-glibc')):
+            needed += ['ar', 'xz', 'readelf', 'rpmbuild', 'rpm']
+        if 'chromium-universal-glibc' in selected:
+            needed.append('patchelf')
         missing = [tool for tool in needed if not shutil.which(tool)]
         if missing:
             parser.error('Install required tools: ' + ', '.join(missing))
@@ -506,6 +523,19 @@ def main(argv=None):
             return 1
         for target in selected:
             try:
+                if target in ('chromium-universal', 'chromium-universal-glibc'):
+                    import mv2universal
+                    if target == 'chromium-universal-glibc':
+                        import mv2glibc
+                        release = mv2glibc.resolve()
+                    else:
+                        release = mv2universal.resolve()
+                    if args.dry_run:
+                        log(mv2universal.describe(release))
+                        counts['resolved'] += 1
+                    else:
+                        counts[mv2universal.build(release, args)] += 1
+                    continue
                 release = resolve(target)
                 if args.dry_run:
                     log(f'{target}: {release.version}\n  {release.url}\n  -> {release.filename}')
@@ -520,6 +550,9 @@ def main(argv=None):
 
 
 if __name__ == '__main__':
+    # The optional universal helper imports this module for the shared builder
+    # APIs and exception type; keep one instance when running as a script.
+    sys.modules['mv2build'] = sys.modules[__name__]
     try:
         raise SystemExit(main())
     except KeyboardInterrupt:

@@ -239,3 +239,168 @@ Builder regression checks:
 ```sh
 python3 -m unittest discover -s tests -v
 ```
+
+### Debian 12 universal packages
+
+```sh
+python3 ./mv2build.py --chromium-universal --output ./builds
+python3 ./mv2build.py --chromium-universal --dry-run
+```
+
+This flag alone selects **only** `chromium-universal`. Combine it with repeated
+`--target` options to build other targets in the same run. It is also available
+as `--target chromium-universal`; the usual default target list stays unchanged.
+Keep both `mv2build.py` and the new helper `mv2universal.py` beside the patcher.
+
+The resolver compares Debian versions, including epochs, security-update revisions
+and `~`, across the official **bookworm**, **bookworm-updates**, and
+**bookworm-security** amd64 indexes. It selects the newest Chromium built for
+Debian 12, with exactly matching `chromium-common` and `chromium-sandbox` packages
+(and matching translations when available). This is Debian's current Bookworm
+build, not the latest upstream snapshot or a build from Debian 13/unstable.
+
+The same patched payload produces three native packages, for example:
+
+- `chromium-universal-156.0.8078.79-4.1.deb12u1-x86_64.pkg.tar.zst`
+- `chromium-universal_156.0.8078.79-4.1.deb12u1_amd64.deb`
+- `chromium-universal-156.0.8078.79-4.1.deb12u1.x86_64.rpm`
+
+The Debian revision is retained in the release component so security rebuilds
+with the same Chromium version get new output names. The first release component
+is the packaging revision, bumped when launcher/runtime integration changes. The manifest
+`chromium-universal.json` records every source package's URL, version and SHA256,
+the patched binary hash, and hashes of all three outputs. Repeat runs skip only
+when the complete set and code fingerprint match. All three formats are staged
+and checked before publication; failure of one format publishes none of the new set.
+
+Additional build tools: `ar` and `readelf` (binutils), `xz`, `rpmbuild` and `rpm`,
+plus `tar`, `zstd`, `bsdtar`. On Arch, the RPM commands are supplied by
+`rpm-tools`; Debian/Ubuntu commonly supply them in `rpm`, and RPM distributions
+in `rpm-build`/`rpm`. No root privileges, package installation, container engine,
+or upstream maintainer scripts are needed. DEB files use the standard ar/control/data
+format without requiring `dpkg-deb` on the build host. RPM output explicitly uses
+format 4 and XZ compression for compatibility with RPM 4 package managers; stripping
+and automatic postprocessing are disabled to preserve the verified binary.
+
+Installation creates `/opt/chromium-universal`, a desktop launcher, and
+`/usr/bin/chromium-universal`. It coexists with the distribution's Chromium and
+uses `~/.config/chromium-universal` by default. Pass `--user-data-dir` to select
+another profile. The packaged setuid sandbox keeps root ownership and mode 4755;
+the launcher does not disable the sandbox. The launcher also sets
+`CHROME_DESKTOP=chromium-universal.desktop` and `--class=chromium-universal`,
+matching the installed desktop entry and its `StartupWMClass` so Wayland/X11
+desktops associate browser windows with the correct icon and launcher.
+
+The launcher exports the user-supplied `GOOGLE_DEFAULT_CLIENT_ID` and
+`GOOGLE_DEFAULT_CLIENT_SECRET` as runtime defaults in all three package formats.
+Existing environment values take precedence, including explicitly empty values.
+This does not add a `GOOGLE_API_KEY` or guarantee access to restricted Google APIs.
+Launch through `chromium-universal` so the runtime settings are applied.
+
+Private runtime libraries come from the same Debian 12 repositories, including
+their transitive library dependencies and copyright files. They are confined to
+`/opt/chromium-universal/lib` and used only by this launcher as a fallback for
+missing SONAMEs. Native 64-bit library directories have priority; an explicit
+user `LD_LIBRARY_PATH` keeps its priority. This lets the host's GTK/GLib discover
+its dconf backend and keeps Mesa/Wayland/XCB on the host's consistent ABI. Putting
+all Debian libraries first can break EGL initialization on newer distributions
+and make GTK read the fallback close-only button layout.
+
+**glibc >= 2.36**,
+libgcc/libstdc++ (GCC 12 or newer), the graphics/device stack, CA certificates and
+xdg-utils are supplied by the host and declared as native package dependencies.
+RPM is a package format, not a guarantee of compatibility with every Red Hat
+release: systems whose glibc is older than 2.36, including stock RHEL 9, do not
+meet this baseline. GUI/GPU compatibility still depends on the host environment.
+Private libraries are refreshed by rerunning this build; the host package manager
+does not update them individually. These local packages are unsigned.
+
+### Optional private-glibc variant
+
+```sh
+python3 ./mv2build.py --chromium-universal-glibc --output ./builds
+# Inspect source/runtime versions without downloading browser packages:
+python3 ./mv2build.py --chromium-universal-glibc --dry-run
+# Explicitly request both universal variants:
+python3 ./mv2build.py --chromium-universal --chromium-universal-glibc
+```
+
+`--chromium-universal-glibc` alone builds **only** the private-runtime variant.
+It is excluded from the default run and from `--chromium-universal`; it is also
+available as the explicit target `--target chromium-universal-glibc`. All three
+native formats (Arch, DEB, RPM) are produced. Add **patchelf** to the normal
+universal build prerequisites. Keep `mv2build.py`, `mv2universal.py`, and the new
+`mv2glibc.py` helper together beside the patcher.
+
+The browser and **all bundled libraries come from the same Debian 12
+Bookworm repositories**, including updates/security and Bookworm backports for
+the graphics stack. The core runtime uses
+`libc6` (glibc 2.36 with its matching `ld-linux`), `libgcc-s1`, and `libstdc++6`
+(GCC 12). No Arch runtime or Wayland packages are used. GCC library versions
+must match. Every downloaded package is checked against its repository SHA256;
+all versions and source URLs are recorded in the manifest and `sources.json`.
+Core runtime and Mesa versions are included in native package releases so updates
+produce distinct package versions. Private packaging revision 5 supersedes the
+older Arch-runtime builds even though the glibc version is lower.
+
+This variant uses separate names throughout:
+
+- Package, executable, window class: `chromium-universal-glibc`.
+- Installation: `/opt/chromium-universal-glibc`.
+- Private libc/loader/GCC libraries and gconv data: `runtime` below that directory.
+- Application, font, desktop and graphics libraries: `lib` below that directory.
+- Mesa DRI drivers: `lib/dri`; EGL vendor configuration: `egl_vendor.d`.
+- Default profile: `~/.config/chromium-universal-glibc`.
+- Desktop entry: `chromium-universal-glibc.desktop`.
+- Manifest: `chromium-universal-glibc.json`.
+
+It can be installed beside the regular `chromium-universal`. Neither package
+provides/replaces system glibc/GCC/Mesa packages or installs libraries into system
+library directories. The private variant bundles libudev, GLVND, GBM, Mesa EGL/GLX
+and DRI drivers, libdrm, Wayland, HarfBuzz/FreeType, NSS/NSPR, D-Bus and their
+library dependency closures. Native package dependencies are certificates and
+xdg-utils; the display server/compositor, kernel, devices and fonts remain native.
+The host package manager does not update these private copies individually;
+rerun the builder to pick up Debian security updates.
+
+`patchelf` rewrites `PT_INTERP` in Chromium and executable helpers to the installed
+private `ld-linux`. Transitive `DT_RPATH` prefers private `runtime`, `compat`,
+`lib` and browser directories, followed by system library directories. The whole
+bundled application ABI takes priority, so an old system FreeType/NSS/zlib cannot
+intercept a bundled library's dependencies merely because its SONAME matches.
+`compat` records the recursive pinned NSS/NSPR/D-Bus dependency set through
+relative links to `lib`, including libgcrypt/libgpg-error. Core libraries are kept
+in `runtime`. The regular `--chromium-universal` variant retains its host-library
+preference and system-runtime baseline.
+
+The launcher clears inherited `LD_LIBRARY_PATH` instead of exposing private libc
+to unrelated host programs. It selects private gconv data, Mesa DRI drivers and
+EGL vendor configuration using `GCONV_PATH`, `LIBGL_DRIVERS_PATH` and
+`__EGL_VENDOR_LIBRARY_FILENAMES`; explicit driver/vendor overrides are preserved.
+Mesa components come from one Debian source set, avoiding native Mesa modules
+which may require a newer glibc or Wayland than Debian 12 provides. Driver
+hard-link aliases are preserved as relative links without duplicating megadriver
+payloads. Only one native format's temporary packaging copies are retained at a
+time, reducing memory use when `/tmp` is a tmpfs.
+
+Mesa/Wayland backports are still built for Debian 12's glibc baseline. They supply
+newer EGL functionality needed by current Chromium while the core remains
+Debian glibc 2.36/GCC 12. The tested Debian libc declares Linux ABI **3.2.0** and
+**x86-64-baseline**, so Linux 3.13 meets its kernel ABI requirement.
+
+This is an experimental portability option. The Debian libc's kernel ABI and the
+browser's own kernel/CPU requirements still apply; packaging cannot emulate newer
+kernel interfaces. Hardware acceleration depends on the kernel/device and bundled
+Mesa driver supporting the GPU. Ubuntu 12.04 userspace with an updated kernel is
+the intended old-system baseline; this is not a claim of testing every GUI/GPU on
+that distribution. Sandbox mode 4755 and root installation ownership are retained;
+production launchers do not disable the browser sandbox. Chromium's MV2 analysis
+must still report `patched` after all ELF edits, and the manifest's browser hash
+is computed after those edits.
+
+Validation covers opt-in target selection, independent identities, Debian-only
+core provenance, matching GCC versions, native dependencies, interpreter/RPATH,
+sandbox modes and MV2 verification. Regression fixtures reproduce old-host NSS
+symbol-version failures, the libgcrypt/libgpg-error missing-symbol failure and
+HarfBuzz/FreeType `FT_Get_Transform` failure. Real package and GPU smoke checks use
+a temporary mount namespace and do not install packages on the build host.
