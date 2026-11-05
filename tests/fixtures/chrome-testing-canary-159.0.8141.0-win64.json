@@ -1,0 +1,49 @@
+{
+  "source": "Google Chrome for Testing canary 159.0.8141.0 Windows x64 chrome.dll",
+  "source_sha256": "8b2e0abbda7051f8d7e9421aa96ce7797b01a8756008068a9e8bc8d98182141d",
+  "note": "Instruction windows copied from the exact upstream ZIP. Internal branch displacements are preserved; external calls are never executed. Test PE header is synthetic.",
+  "windows": [
+    {
+      "name": "must_disable",
+      "source_offset": "0x194758a",
+      "test_offset": "0x200",
+      "hex": "83 7f 50 02 0f 8f 8c 00 00 00 48 8b 8f 28 02 00 00 8b 41 50 80 bf 08 02 00 00 00 75 0b 8b 89 88 00 00 00 83 f9 01 75 64 31 ff 83 f8 05 74 05 83 f8 0a 75 32 80 7c 24 37 00 78 5f 48 8b 44 24 48 48 31 e0 48 8b 0d 6c 90 8b 10 48 39 c1 75 0a 89 f8 48 83 c4 50 5b 5f 5e c3 48 8b 4c 24 48 48 31 e1 e8 c0 9c 72 04 b8 00 00 80 00 eb 13 b8 00 00 40 00 eb 0c b8 00 40 00 00 eb 05 b8 00 01 00 00 48 85 f6 74 02 89 06 40 b7 01 eb a8 83 f9 08 74 97 83 f9 03 74 92 31 ff eb 9a 48 ba ff ff ff ff ff ff ff 7f 48 23 54 24 30 48 8b 4c 24 20 e8 73 ad 74 02 eb 86 f6 87 55 02 00 00 80 0f 85 0a ff"
+    },
+    {
+      "name": "filter_and_startup",
+      "source_offset": "0x17c1df5",
+      "test_offset": "0x300",
+      "hex": "41 83 78 50 02 7f 34 4d 8b 88 28 02 00 00 41 8b 51 50 41 80 b8 08 02 00 00 00 75 11 45 8b 81 88 00 00 00 41 83 f8 01 0f 85 7b 04 00 00 83 fa 05 74 09 83 fa 0a 0f 85 86 04 00 00 48 8b 51 08 48 85 d2 0f 85 2a 03 00 00 48 89 ca 48 8b 49 10 48 3b 11 75 f4 48 39 c1 75 a3 48 8b 5e 18 e8 09 94 e3 ff 48 89 c1 48 89 da 41 b0 01 e8 9b 43 b7 02 48 8b 6c 24 40 4c 39 f5 0f 85 8a 03 00 00 48 8b 4c 24 48 e8 93 04 00 00 48 8b 0d 04 48 b9 10 48 8b 56 18 48 8b 01 48 8b 80 38 03 00 00 ff 15 08 5d 9e 10 84 c0 0f 84 93 00 00 00 48 8b 7e 18 8b 05 4e 47 b9 10 8b 0d f0 5f b4 10 65 48 8b 14 25 58 00 00 00 48 8b 0c ca 3b 81 04 00 00 00 0f 8f e6 01 00 00 48 8d 0d f0 46 b9 10 48 89 fa 41 b0 01 e8 25 43 b7 02 48 89 c7 48 89 74 24 40 4c 8b 70 08 48 8d 58 10 49 39 de 74 32 48 8d 74 24 40 49 8b 56 38 48 89 f1 41 b0 01 e8 5c 04 00 00 49 8b 46 08 48 85 c0 0f 85 66 02 00 00 4c 89 f0 4d 8b 76 10 49 3b 06 75 f4 49 39 de 75 d3 48 8b 5f 28 48 83 c7 30 48 39 fb 0f 85 8a 02 00 00 48 8b 44 24 60 48 31 e0 48 8b 0d fe e6 a3 10 48 39 c1 0f 85 0f 02 00 00 48 83 c4 68 5b 5d 5f 5e 41 5c 41 5d 41 5e 41 5f c3 48 8d 0d 95 46 b9 10 e8 58 af 8a 04 83 3d 89 46 b9 10 ff 0f 85 4b fe ff ff e8 a6 17 d1 fe 48 8d 0d 2f bc ad 0e 48 89 0d 38 46 b9 10 48 b9 00 00 00 00 fc ff ff ff 48 21 c1 48 3b 0d 6c b8 a9 10 0f 84 50 03 00 00 48 89 05 1f 46 b9 10 48 8d 15 10 46 b9 10 48 8d 0d f9 cc 4e 0f 48 89 0d 12 46 b9 10 c7 05 10 46 b9 10 00 00 00 00 48 89 c1 e8 a0 f2 f9 ff 0f 57 c0 0f 11 05 06 46 b9 10 48 c7 05 0b 46 b9 10 00 00 00 00 48 8d 05 c4 ec 94 0e 48 89 05 cd 45 b9 10 48 8d 0d fe 45 b9 10 e8 51 ae 8a 04 e9 bc fd ff ff 48 8d 0d ed 45 b9 10 e8 b0 ae 8a 04 83 3d e1 45 b9 10 ff 0f 85 1e fd ff ff e8 fe 16 d1 fe 48 89 c3 48 8d 05 84 bb ad 0e 48 89 05 8d 45 b9 10 48 b8 00 00 00 00 fc ff ff ff 48 21 d8 48 3b 05 c1 b7 a9 10 0f 84 8b 02 00 00 48 89 1d 74 45 b9 10 48 8d 15 65 45 b9 10 48 8d 05 4e cc 4e 0f 48 89 05 67 45 b9 10 c7 05 65 45 b9 10 00 00 00 00 48 89 d9 e8 f5 f1 f9 ff 0f 57 c0 0f 11 05 5b 45 b9 10 48 c7 05 60 45 b9 10 00 00 00 00 48 8d 05 19 ec 94 0e 48 89 05 22 45 b9 10 48 8d 0d 53 45 b9 10 e8 a6 ad 8a 04 e9 8c fc ff ff 48 8d 0d 42 45 b9 10 e8 05 ae 8a 04 83 3d 36 45 b9 10 ff 0f 85 01 fe ff ff e8 53 16 d1 fe 48 89 c3 48 8d 05 d9 ba ad 0e 48 89 05 e2 44 b9 10 48 b8 00 00 00 00 fc ff ff ff 48 21 d8 48 3b 05 16 b7 a9 10 0f 84 ed 01 00 00 48 89 1d c9 44 b9 10 48 8d 15 ba 44 b9 10 48 8d 05 a3 cb 4e 0f 48 89 05 bc 44 b9 10 c7 05 ba 44 b9 10 00 00 00 00 48 89 d9 e8 4a f1 f9 ff 0f 57 c0 0f 11 05 b0 44 b9 10 48 c7 05 b5 44 b9 10 00 00 00 00 48 8d 05 6e eb 94 0e 48 89 05 77 44 b9 10 48 8d 0d a8 44 b9 10 e8 fb ac 8a 04 e9 6f fd ff ff 48 8b 4c 24 60 48 31 e1 e8 49 f1 8a 04 48 89 d1 48 8b 12 48 85 d2 75 f5 e9 d2 fc ff ff 49 89 c6 48 8b 00 48 85 c0 75 f5 e9 96 fd ff ff 48 8b 57 38 48 89 f1 e8 8d 78 45 07 48 8b 47 08 48 85 c0 74 10 48 89 c7 48 8b 00 48 85 c0 75 f5 e9 cd fb ff ff 48 89 f8 48 8b 7f 10 48 3b 07 75 f4 e9 bc fb ff ff 48 8d 74 24 40 48 8b 53 38 48 89 f1 45 31 c0 e8 8f 01 00 00 48 8b 43 08 48 85 c0 74 15 48 89 c3 48 8b 00 48 85 c0 75 f5 48 39 fb 75 d8 e9 44 fd ff ff 48 89 d8 48 8b 5b 10 48 3b 03 75 f4 eb e8 bb 01 00 00 00 4c 8d 6c 24 38 4d 89 f7 b9 04 00 00 00 49 89 c6 e8 29 99 8a 04 48 89 44 24 20 48 89 5c 24 30 c7 00 00 00 80 00 48 89 5c 24 28 4c 8d 40 04 48 89 f9 48 89 c2 e8 55 0d a0 01 48 8b 4d 20 e8 2c d1 2b 00 4d 89 f4 4c 89 f1 48 89 c2 49 89 f8 e8 db cb 43 07 48 89 7c 24 38 4c"
+    },
+    {
+      "name": "extension_checker_1",
+      "source_offset": "0x37e5a90",
+      "test_offset": "0x800",
+      "hex": "83 7a 50 02 7f 37 48 8b 8a 28 02 00 00 8b 41 50 80 ba 08 02 00 00 00 75 0b 8b 89 88 00 00 00 83 f9 01 75 0f 83 f8 05 0f 95 c1 83 f8 0a 0f 95 c0 20 c8 c3 83 f9 08 74 ec 83 f9 03 74 e7 31 c0 eb f1 cc cc"
+    },
+    {
+      "name": "extension_checker_2",
+      "source_offset": "0x8c19910",
+      "test_offset": "0x900",
+      "hex": "83 7a 50 02 7f 37 48 8b 8a 28 02 00 00 8b 41 50 80 ba 08 02 00 00 00 75 0b 8b 89 88 00 00 00 83 f9 01 75 0f 83 f8 05 0f 95 c1 83 f8 0a 0f 95 c0 20 c8 c3 83 f9 08 74 ec 83 f9 03 74 e7 31 c0 eb f1 cc cc"
+    },
+    {
+      "name": "reenable",
+      "source_offset": "0x8c19a52",
+      "test_offset": "0xa00",
+      "hex": "83 7e 50 02 7f 30 48 8b 8e 28 02 00 00 8b 41 50 80 be 08 02 00 00 00 75 0b 8b 89 88 00 00 00 83 f9 01 75 4c 83 f8 0a 74 0d 83 f8 05 74 08 48 83 c4 20 5b 5f 5e c3 48 8b 7f 18 e8 cf 17 9e f8 48 89 c1 48 89 fa 41 b0 01 e8 61 c7 71 fb 48 89 c7 48 89 f1 e8 c6 58 e6 f8 48 89 f9 48 89 c2 41 b8 00 00 80 00 48 83 c4 20 5b 5f 5e e9 6e 59 fe ff 83 f9 08 74 af 83 f9 03 74 aa eb ba cc cc 48 83"
+    },
+    {
+      "name": "integer_checker",
+      "source_offset": "0x8c19c80",
+      "test_offset": "0xb00",
+      "hex": "31 c0 83 f9 02 7f 1f 83 fa 08 77 1a b9 0a 01 00 00 0f a3 d1 73 10 41 83 f8 05 0f 95 c1 41 83 f8 0a 0f 95 c0 20 c8 c3 cc cc"
+    },
+    {
+      "name": "install_policy",
+      "source_offset": "0x93e8bf2",
+      "test_offset": "0xc00",
+      "hex": "83 7f 50 02 7f 30 48 8b 8f 28 02 00 00 8b 41 50 80 bf 08 02 00 00 00 75 0f 8b 89 88 00 00 00 83 f9 01 0f 85 0f 01 00 00 83 f8 05 74 09 83 f8 0a 0f 85 c9 00 00 00 4c 8d b4 24 50 02 00 00 48 89 d9 48 89 fa 4d 89 f0 e8 b2 c7 40 fa 48 8d 4c 24 40 88 41 f8 48 8d 5c 24 38 41 80 7e 17 00 0f 88 16 ff ff ff 48 8b 84 24 60 02 00 00 48 89 41 10 0f 28 84 24 50 02 00 00 0f 11 01 48 89 f1 48 89 da e8 e8 fb 82 ff 48 85 ff 74 1a f0 ff 0f 75 15 48 89 f9 e8 f6 0e 55 f8 ba 70 02 00 00 48 89 f9 e8 19 97 ca fa 48 89 f1 e8 01 20 cb fb 48 8b 84 24 68 02 00 00 48 31 e0 48 8b 0d 8f 79 e1 08 48 39 c1 75 63 48 81 c4 70 02 00 00 5b 5f 5e 41 5e 41 5f c3 4c 8d b4 24 50 02 00 00 48 89 d9 4c 89 f2 49 89 f8 e8 95 f9 ff ff 48 8d 8c 24 80 00 00 00 c6 41 f8 00 48 8d 5c 24 78 e9 5a ff ff ff 4c 8d b4 24 50 02 00 00 4c 89 f1 ba 8c 20 00 00 e8 8a 3e c6 f9 48 8d 4c 24 60 c6 41 f8 00 48 8d 5c 24 58 e9 32 ff ff ff 48 8b 8c 24 68 02 00 00 48 31 e1 e8 87 85 c8 fc 83 f9 08 0f 84 e8 fe ff ff 83 f9 03 0f 85 ed fe ff ff e9 da fe ff ff 4d 89 c1 49 89 d0 48 8b 49 10 31 d2 e9 9f 97 50 f9 cc"
+    }
+  ]
+}

@@ -179,7 +179,7 @@ class BuilderTests(unittest.TestCase):
         binary = root / 'usr/lib/chromium/chromium'
         binary.write_bytes(b'patched browser')
         binary.chmod(0o755)
-        (root / '.PKGINFO').write_text('pkgname = chromium\npkgver = 156.0.8078.79-1\n')
+        (root / '.PKGINFO').write_text('pkgname = chromium\npkgver = 156.0.8078.79-1\narch = x86_64\n')
         (root / '.BUILDINFO').write_text('format = 2\n')
         (root / '.MTREE').write_bytes(b'old hashes')
         (root / 'usr/bin').mkdir()
@@ -195,9 +195,17 @@ class BuilderTests(unittest.TestCase):
         unpacked = self.root / 'check.tar'
         builder.run(['zstd', '-d', '-q', archive, '-o', unpacked])
         with tarfile.open(unpacked) as tar:
-            self.assertEqual(tar.extractfile('./.PKGINFO').read(), (root / '.PKGINFO').read_bytes())
-            self.assertEqual(tar.getmember('./usr/lib/chromium/chromium').uid, 0)
-            self.assertTrue(tar.getmember('./usr/bin/chromium').issym())
+            self.assertEqual(tar.extractfile('.PKGINFO').read(), (root / '.PKGINFO').read_bytes())
+            self.assertEqual(tar.getmember('usr/lib/chromium/chromium').uid, 0)
+            self.assertTrue(tar.getmember('usr/bin/chromium').issym())
+            self.assertFalse(any(name.startswith('./') for name in tar.getnames()))
+        if shutil.which('pacman'):
+            info = builder.run(['pacman', '-Qip', archive]).decode()
+            self.assertIn('156.0.8078.79-1', info)
+        broken = self.root / 'broken.pkg.tar.zst'
+        builder.run(['tar', '--zstd', '-cf', broken, '-C', root, '.'])
+        with self.assertRaises(builder.BuildError):
+            builder.verify_arch_package(broken)
 
     def test_failed_patch_publishes_nothing_and_success_is_cached(self):
         output = self.root / 'builds'
