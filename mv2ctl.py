@@ -89,6 +89,8 @@ from mv2profiles import (
     WIN_INSTALL_V15_ERROR,
     WIN_INSTALL_V16_ERROR,
     WIN_INSTALL_V17_ERROR,
+    WIN_INSTALL_V18_ERROR,
+    WIN_INSTALL_V19_ERROR,
     WIN_INSTALL_V8_TYPES,
     WIN_EXTENSION_FILTER_V11,
     WIN_STARTUP_V5,
@@ -690,7 +692,9 @@ def find_sites(mm, segs):
             is158_8106 = WIN_INSTALL_V12_ERROR.search(mm, lo, hi) is not None
             is158_8127 = WIN_INSTALL_V16_ERROR.search(mm, lo, hi) is not None
             is159 = (WIN_INSTALL_V15_ERROR.search(mm, lo, hi) is not None or
-                     WIN_INSTALL_V17_ERROR.search(mm, lo, hi) is not None)
+                     WIN_INSTALL_V17_ERROR.search(mm, lo, hi) is not None or
+                     WIN_INSTALL_V18_ERROR.search(mm, lo, hi) is not None or
+                     WIN_INSTALL_V19_ERROR.search(mm, lo, hi) is not None)
             is158 = (is158_8106 or is158_8127 or is159 or
                      WIN_INSTALL_V11_ERROR.search(mm, lo, hi) is not None or
                      WIN_INSTALL_V14_ERROR.search(mm, lo, hi) is not None)
@@ -790,6 +794,8 @@ def find_sites(mm, segs):
                         (WIN_INSTALL_V14_ERROR, "Chrome 158.0.8117.2"),
                         (WIN_INSTALL_V16_ERROR, "Chrome Beta 158.0.8127.2"),
                         (WIN_INSTALL_V17_ERROR, "Chrome for Testing Canary 159.0.8141.0"),
+                        (WIN_INSTALL_V18_ERROR, "Chrome for Testing Dev 159.0.8144.0"),
+                        (WIN_INSTALL_V19_ERROR, "Chrome for Testing Canary 159.0.8146.0"),
                     )
                     validated_error = next(
                         (label for error_rx, label in error_profiles
@@ -809,6 +815,8 @@ def find_sites(mm, segs):
                         "Chrome Beta 158.0.8127.2": "W5_158_8127",
                         "Chrome 159.0.8130.0": "W5_159",
                         "Chrome for Testing Canary 159.0.8141.0": "W5_159_8141",
+                        "Chrome for Testing Dev 159.0.8144.0": "W5_159_8144",
+                        "Chrome for Testing Canary 159.0.8146.0": "W5_159_8146",
                         "Chrome 158.0.8106": "W5_158_8106",
                         "Chrome 156.0.8078.48": "W5_156",
                     }.get(install_label, "W5")

@@ -1,0 +1,49 @@
+{
+  "source": "Google Chrome for Testing dev 159.0.8144.0 Windows x64 chrome.dll",
+  "source_sha256": "0868fa9ae99f5fbf44e0ddb06fcaecb4a1c35021214eac54c91201983adebc5d",
+  "note": "Instruction windows copied from the exact upstream Chrome for Testing ZIP. Internal branch displacements are preserved; external calls are never executed. Test PE header is synthetic.",
+  "windows": [
+    {
+      "name": "must_disable",
+      "source_offset": "0x19793fa",
+      "test_offset": "0x200",
+      "hex": "83 7f 50 02 0f 8f 8c 00 00 00 48 8b 8f 28 02 00 00 8b 41 50 80 bf 08 02 00 00 00 75 0b 8b 89 88 00 00 00 83 f9 01 75 64 31 ff 83 f8 05 74 05 83 f8 0a 75 32 80 7c 24 37 00 78 5f 48 8b 44 24 48 48 31 e0 48 8b 0d fc c1 87 10 48 39 c1 75 0a 89 f8 48 83 c4 50 5b 5f 5e c3 48 8b 4c 24 48 48 31 e1 e8 c0 0c 75 04 b8 00 00 80 00 eb 13 b8 00 00 40 00 eb 0c b8 00 40 00 00 eb 05 b8 00 01 00 00 48 85 f6 74 02 89 06 40 b7 01 eb a8 83 f9 08 74 97 83 f9 03 74 92 31 ff eb 9a 48 ba ff ff ff ff ff ff ff 7f 48 23 54 24 30 48 8b 4c 24 20 e8 93 93 6e 02 eb 86 f6 87 55 02 00 00 80 0f 85 0a ff"
+    },
+    {
+      "name": "filter_and_startup",
+      "source_offset": "0x16277a5",
+      "test_offset": "0x300",
+      "hex": "41 83 78 50 02 7f 34 4d 8b 88 28 02 00 00 41 8b 51 50 41 80 b8 08 02 00 00 00 75 11 45 8b 81 88 00 00 00 41 83 f8 01 0f 85 7b 04 00 00 83 fa 05 74 09 83 fa 0a 0f 85 86 04 00 00 48 8b 51 08 48 85 d2 0f 85 2a 03 00 00 48 89 ca 48 8b 49 10 48 3b 11 75 f4 48 39 c1 75 a3 48 8b 5e 18 e8 19 76 0b 00 48 89 c1 48 89 da 41 b0 01 e8 6b 98 29 03 48 8b 6c 24 40 4c 39 f5 0f 85 8a 03 00 00 48 8b 4c 24 48 e8 93 04 00 00 48 8b 0d d4 3e d2 10 48 8b 56 18 48 8b 01 48 8b 80 38 03 00 00 ff 15 c8 46 b7 10 84 c0 0f 84 93 00 00 00 48 8b 7e 18 8b 05 1e 3e d2 10 8b 0d a0 56 cd 10 65 48 8b 14 25 58 00 00 00 48 8b 0c ca 3b 81 04 00 00 00 0f 8f e6 01 00 00 48 8d 0d c0 3d d2 10 48 89 fa 41 b0 01 e8 f5 97 29 03 48 89 c7 48 89 74 24 40 4c 8b 70 08 48 8d 58 10 49 39 de 74 32 48 8d 74 24 40 49 8b 56 38 48 89 f1 41 b0 01 e8 5c 04 00 00 49 8b 46 08 48 85 c0 0f 85 66 02 00 00 4c 89 f0 4d 8b 76 10 49 3b 06 75 f4 49 39 de 75 d3 48 8b 5f 28 48 83 c7 30 48 39 fb 0f 85 8a 02 00 00 48 8b 44 24 60 48 31 e0 48 8b 0d 4e dd bc 10 48 39 c1 0f 85 0f 02 00 00 48 83 c4 68 5b 5d 5f 5e 41 5c 41 5d 41 5e 41 5f c3 48 8d 0d 65 3d d2 10 e8 38 d4 a9 04 83 3d 59 3d d2 10 ff 0f 85 4b fe ff ff e8 46 92 06 ff 48 8d 0d ef 18 c6 0e 48 89 0d 08 3d d2 10 48 b9 00 00 00 00 fc ff ff ff 48 21 c1 48 3b 0d 7c ae c2 10 0f 84 50 03 00 00 48 89 05 ef 3c d2 10 48 8d 15 e0 3c d2 10 48 8d 0d 59 06 67 0f 48 89 0d e2 3c d2 10 c7 05 e0 3c d2 10 00 00 00 00 48 89 c1 e8 40 78 23 00 0f 57 c0 0f 11 05 d6 3c d2 10 48 c7 05 db 3c d2 10 00 00 00 00 48 8d 05 04 45 ad 0e 48 89 05 9d 3c d2 10 48 8d 0d ce 3c d2 10 e8 51 d2 a9 04 e9 bc fd ff ff 48 8d 0d bd 3c d2 10 e8 90 d3 a9 04 83 3d b1 3c d2 10 ff 0f 85 1e fd ff ff e8 9e 91 06 ff 48 89 c3 48 8d 05 44 18 c6 0e 48 89 05 5d 3c d2 10 48 b8 00 00 00 00 fc ff ff ff 48 21 d8 48 3b 05 d1 ad c2 10 0f 84 8b 02 00 00 48 89 1d 44 3c d2 10 48 8d 15 35 3c d2 10 48 8d 05 ae 05 67 0f 48 89 05 37 3c d2 10 c7 05 35 3c d2 10 00 00 00 00 48 89 d9 e8 95 77 23 00 0f 57 c0 0f 11 05 2b 3c d2 10 48 c7 05 30 3c d2 10 00 00 00 00 48 8d 05 59 44 ad 0e 48 89 05 f2 3b d2 10 48 8d 0d 23 3c d2 10 e8 a6 d1 a9 04 e9 8c fc ff ff 48 8d 0d 12 3c d2 10 e8 e5 d2 a9 04 83 3d 06 3c d2 10 ff 0f 85 01 fe ff ff e8 f3 90 06 ff 48 89 c3 48 8d 05 99 17 c6 0e 48 89 05 b2 3b d2 10 48 b8 00 00 00 00 fc ff ff ff 48 21 d8 48 3b 05 26 ad c2 10 0f 84 ed 01 00 00 48 89 1d 99 3b d2 10 48 8d 15 8a 3b d2 10 48 8d 05 03 05 67 0f 48 89 05 8c 3b d2 10 c7 05 8a 3b d2 10 00 00 00 00 48 89 d9 e8 ea 76 23 00 0f 57 c0 0f 11 05 80 3b d2 10 48 c7 05 85 3b d2 10 00 00 00 00 48 8d 05 ae 43 ad 0e 48 89 05 47 3b d2 10 48 8d 0d 78 3b d2 10 e8 fb d0 a9 04 e9 6f fd ff ff 48 8b 4c 24 60 48 31 e1 e8 09 26 aa 04 48 89 d1 48 8b 12 48 85 d2 75 f5 e9 d2 fc ff ff 49 89 c6 48 8b 00 48 85 c0 75 f5 e9 96 fd ff ff 48 8b 57 38 48 89 f1 e8 1d 93 62 07 48 8b 47 08 48 85 c0 74 10 48 89 c7 48 8b 00 48 85 c0 75 f5 e9 cd fb ff ff 48 89 f8 48 8b 7f 10 48 3b 07 75 f4 e9 bc fb ff ff 48 8d 74 24 40 48 8b 53 38 48 89 f1 45 31 c0 e8 8f 01 00 00 48 8b 43 08 48 85 c0 74 15 48 89 c3 48 8b 00 48 85 c0 75 f5 48 39 fb 75 d8 e9 44 fd ff ff 48 89 d8 48 8b 5b 10 48 3b 03 75 f4 eb e8 bb 01 00 00 00 4c 8d 6c 24 38 4d 89 f7 b9 04 00 00 00 49 89 c6 e8 d9 cd a9 04 48 89 44 24 20 48 89 5c 24 30 c7 00 00 00 80 00 48 89 5c 24 28 4c 8d 40 04 48 89 f9 48 89 c2 e8 95 d9 b3 01"
+    },
+    {
+      "name": "extension_checker_1",
+      "source_offset": "0x3782410",
+      "test_offset": "0x800",
+      "hex": "83 7a 50 02 7f 37 48 8b 8a 28 02 00 00 8b 41 50 80 ba 08 02 00 00 00 75 0b 8b 89 88 00 00 00 83 f9 01 75 0f 83 f8 05 0f 95 c1 83 f8 0a 0f 95 c0 20 c8 c3 83 f9 08 74 ec 83 f9 03 74 e7 31 c0 eb f1 cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc"
+    },
+    {
+      "name": "extension_checker_2",
+      "source_offset": "0x8c50d50",
+      "test_offset": "0x900",
+      "hex": "83 7a 50 02 7f 37 48 8b 8a 28 02 00 00 8b 41 50 80 ba 08 02 00 00 00 75 0b 8b 89 88 00 00 00 83 f9 01 75 0f 83 f8 05 0f 95 c1 83 f8 0a 0f 95 c0 20 c8 c3 83 f9 08 74 ec 83 f9 03 74 e7 31 c0 eb f1 cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc"
+    },
+    {
+      "name": "reenable",
+      "source_offset": "0x8c50e92",
+      "test_offset": "0xa00",
+      "hex": "83 7e 50 02 7f 30 48 8b 8e 28 02 00 00 8b 41 50 80 be 08 02 00 00 00 75 0b 8b 89 88 00 00 00 83 f9 01 75 4c 83 f8 0a 74 0d 83 f8 05 74 08 48 83 c4 20 5b 5f 5e c3 48 8b 7f 18 e8 4f df a8 f8 48 89 c1 48 89 fa 41 b0 01 e8 a1 01 c7 fb 48 89 c7 48 89 f1 e8 a6 c7 e0 f8 48 89 f9 48 89 c2 41 b8 00 00 80 00 48 83 c4 20 5b 5f 5e e9 de 5a fe ff 83 f9 08 74 af 83 f9 03 74 aa eb ba cc cc 48 83"
+    },
+    {
+      "name": "integer_checker",
+      "source_offset": "0x8c510c0",
+      "test_offset": "0xb00",
+      "hex": "31 c0 83 f9 02 7f 1f 83 fa 08 77 1a b9 0a 01 00 00 0f a3 d1 73 10 41 83 f8 05 0f 95 c1 41 83 f8 0a 0f 95 c0 20 c8 c3 cc cc cc cc cc cc cc cc cc 48 8b 05 e1 a6 6f 09 c3 cc cc cc cc cc cc cc cc"
+    },
+    {
+      "name": "install_policy",
+      "source_offset": "0x93f4ae2",
+      "test_offset": "0xc00",
+      "hex": "83 7f 50 02 7f 30 48 8b 8f 28 02 00 00 8b 41 50 80 bf 08 02 00 00 00 75 0f 8b 89 88 00 00 00 83 f9 01 0f 85 0f 01 00 00 83 f8 05 74 09 83 f8 0a 0f 85 c9 00 00 00 4c 8d b4 24 50 02 00 00 48 89 d9 48 89 fa 4d 89 f0 e8 32 1c 3a fa 48 8d 4c 24 40 88 41 f8 48 8d 5c 24 38 41 80 7e 17 00 0f 88 16 ff ff ff 48 8b 84 24 60 02 00 00 48 89 41 10 0f 28 84 24 50 02 00 00 0f 11 01 48 89 f1 48 89 da e8 08 b1 85 ff 48 85 ff 74 1a f0 ff 0f 75 15 48 89 f9 e8 26 2c 5c f8 ba 70 02 00 00 48 89 f9 e8 b9 dc c6 fa 48 89 f1 e8 91 8b 70 fb 48 8b 84 24 68 02 00 00 48 31 e0 48 8b 0d 9f 0a e0 08 48 39 c1 75 63 48 81 c4 70 02 00 00 5b 5f 5e 41 5e 41 5f c3 4c 8d b4 24 50 02 00 00 48 89 d9 4c 89 f2 49 89 f8 e8 95 f9 ff ff 48 8d 8c 24 80 00 00 00 c6 41 f8 00 48 8d 5c 24 78 e9 5a ff ff ff 4c 8d b4 24 50 02 00 00 4c 89 f1 ba 0a 20 00 00 e8 6a 10 83 fc 48 8d 4c 24 60 c6 41 f8 00 48 8d 5c 24 58 e9 32 ff ff ff 48 8b 8c 24 68 02 00 00 48 31 e1 e8 07 55 cd fc 83 f9 08 0f 84 e8 fe ff ff 83 f9 03 0f 85 ed fe ff ff e9 da fe ff ff 4d 89 c1 49 89 d0 48 8b 49 10 31 d2 e9 af 7b 53 f9 cc"
+    }
+  ]
+}

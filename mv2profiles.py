@@ -68,13 +68,21 @@ EXPECT_PROFILES = {
         "W1": 2, "W2": 1, "W3": 1, "W4": 1, "W5": 0,
         "W5_157": 0, "W5_158": 0, "W5_159": 1, "W6": 1,
     },
-    "Google Chrome Beta 158.0.8127.2 Windows PE x86-64": {
+    "Google Chrome Beta 158.0.8127.2 / 8127.18 Windows PE x86-64": {
         "A": 1, "W1": 2, "W2": 1, "W3": 1, "W4": 1,
         "W5_158_8127": 1, "W6": 1,
     },
     "Google Chrome for Testing Canary 159.0.8141.0 Windows PE x86-64": {
         "A": 1, "W1": 2, "W2": 1, "W3": 1, "W4": 1,
         "W5_159_8141": 1, "W6": 1,
+    },
+    "Google Chrome for Testing Dev 159.0.8144.0 Windows PE x86-64": {
+        "A": 1, "W1": 2, "W2": 1, "W3": 1, "W4": 1,
+        "W5_159_8144": 1, "W6": 1,
+    },
+    "Google Chrome for Testing Canary 159.0.8146.0 Windows PE x86-64": {
+        "A": 1, "W1": 2, "W2": 1, "W3": 1, "W4": 1,
+        "W5_159_8146": 1, "W6": 1,
     },
     "Google Chrome for Testing 158.0.8106.0 Windows PE x86-64": {
         "A": 1, "B": 0, "C": 0, "D": 0, "S": 0, "U": 0,
@@ -336,6 +344,14 @@ WIN_INSTALL_V16_ERROR = _byte_pattern(
 # paired with the validated V11 startup-disable loop rather than V13.
 WIN_INSTALL_V17_ERROR = _byte_pattern(
     "4C 8D B4 24 50 02 00 00 4C 89 F1 BA 8C 20 00 00 E8 ?? ?? ?? ?? "
+    "48 8D 4C 24 60 C6 41 F8 00 48 8D 5C 24 58 E9 ?? ?? ?? ??")
+# Chrome for Testing Dev 159.0.8144.0 uses resource 8202 (0x200A).
+WIN_INSTALL_V18_ERROR = _byte_pattern(
+    "4C 8D B4 24 50 02 00 00 4C 89 F1 BA 0A 20 00 00 E8 ?? ?? ?? ?? "
+    "48 8D 4C 24 60 C6 41 F8 00 48 8D 5C 24 58 E9 ?? ?? ?? ??")
+# Chrome for Testing Canary 159.0.8146.0 uses resource 8212 (0x2014).
+WIN_INSTALL_V19_ERROR = _byte_pattern(
+    "4C 8D B4 24 50 02 00 00 4C 89 F1 BA 14 20 00 00 E8 ?? ?? ?? ?? "
     "48 8D 4C 24 60 C6 41 F8 00 48 8D 5C 24 58 E9 ?? ?? ?? ??")
 WIN_INSTALL_V8_TYPES = _byte_pattern(
     "83 F9 08 0F 84 ?? ?? ?? ?? 83 F9 03 0F 85 ?? ?? ?? ?? E9 ?? ?? ?? ??")
