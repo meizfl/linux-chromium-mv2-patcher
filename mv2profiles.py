@@ -16,6 +16,12 @@ def _byte_pattern(spec):
 
 EXPECT = {"A": 4, "B": 1, "C": 1, "D": 1, "M": 1, "S": 1, "U": 1}
 EXPECT_PROFILES = {
+    "Chrome / Chrome for Testing Canary 159.0.8151.0 Linux x86-64": {
+        "N1": 1, "N2": 1, "N3": 1, "N4": 1, "V": 1, "H": 1,
+    },
+    "Chrome for Testing Canary 159.0.8151.0 Windows x86-64": {
+        "N1": 2, "N2": 1, "N3": 1, "N4": 1, "V": 1,
+    },
     "Chromium 154-compatible ELF layout": EXPECT,
     "Chromium distro ELF layout (alternate MustRemainDisabled call encoding)": {
         "A": 4, "B": 1, "C": 1, "D": 0, "H": 1, "M": 1, "S": 0, "U": 1,
@@ -399,3 +405,110 @@ R155_S = re.compile(
     rb"\x83\x7b\x50\x02(?P<j>\x7f.)"
     rb"\x48\x8b\x8b\x28\x02\x00\x00\x8b\x41\x50"
     rb"\x80\xbb\x08\x02\x00\x00\x00\x75.", F)
+
+def _policy_pattern(before, original, patched, after):
+    return re.compile(_byte_pattern(before).pattern + b"(?P<j>" +
+                      re.escape(bytes.fromhex(original)) + b"|" +
+                      re.escape(bytes.fromhex(patched)) + b")" +
+                      _byte_pattern(after).pattern, F)
+
+# Chrome / Chrome for Testing 159.0.8151.0: inlined policy gates.
+# Full control-flow windows preserve type/location exclusions, disable reasons,
+# epilogues and internal branch distances. Linker addresses alone are masked.
+# (format, kind, pattern, original, patched, detailed offset, safe offset,
+#  safe bytes, description). Offsets are relative to the matched window.
+R159_POLICY = [
+    ('ELF', 'N1', _policy_pattern(
+        '83 7E 50 02',
+        '7e03', '9090',
+        '31 C0 C3 55 48 89 E5 48 8B 86 28 02 00 00 8B 48 50 80 BE 08 '
+        '02 00 00 00 75 17 8B 90 88 00 00 00 31 C0 83 FA 08 77 18 BE '
+        '0A 01 00 00 0F A3 D6 73 0E 83 F9 05 0F 95 C2 83 F9 0A 0F 95 '
+        'C0 20 D0 5D EB C0'
+        ), bytes.fromhex('7e03'), bytes.fromhex('9090'), 9, 6,
+        bytes.fromhex('31c0c3'), 'extension impact checker'),
+    ('ELF', 'N2', _policy_pattern(
+        '41 83 7E 50 02',
+        '7e3e', '9090',
+        '45 31 F6 80 7D E7 00 0F 88 8C 00 00 00 44 89 F0 48 83 C4 18 '
+        '5B 41 5E 41 5F 5D C3 48 8D 3D ?? ?? ?? ?? E8 ?? ?? ?? ?? 85 '
+        'C0 74 B5 E8 ?? ?? ?? ?? 48 8D 3D ?? ?? ?? ?? E8 ?? ?? ?? ?? '
+        'EB ?? 49 8B 8E 28 02 00 00 8B 41 50 41 80 BE 08 02 00 00 00 '
+        '75 18 8B 89 88 00 00 00 45 31 F6 83 F9 08 77 A3 BA 0A 01 00 '
+        '00 0F A3 CA 73 99 45 31 F6 83 F8 05 74 91 83 F8 0A 74 8C B8 '
+        '00 00 80 00 EB 0C B8 00 40 00 00 EB 05 B8 00 00 40 00 48 85 '
+        'DB 74 02 89 03 41 B6 01 E9 6A FF FF FF'
+        ), bytes.fromhex('7e3e'), bytes.fromhex('9090'), 69, 7,
+        bytes.fromhex('4531f6'), 'MustRemainDisabled false-result path'),
+    ('ELF', 'N3', _policy_pattern(
+        '83 7E 50 02',
+        '7456', '9090',
+        '48 83 C4 30 5B 41 5E 5D C3 41 89 D6 E8 ?? ?? ?? ?? 48 89 C3 '
+        '48 8B 7D E8 E8 ?? ?? ?? ?? 48 89 DF 48 89 C6 BA 00 00 80 00 '
+        'E8 ?? ?? ?? ?? 45 84 F6 74 08 84 C0 0F 85 15 01 00 00 0F B6 '
+        'D8 83 C3 03 48 8B 45 E8 48 8B 80 28 02 00 00 EB ?? 48 8D 05 '
+        '?? ?? ?? ?? EB ?? 80 BE 08 02 00 00 00 75 A1 48 8B 3F 48 8B '
+        '86 28 02 00 00 8B 88 88 00 00 00 83 F9 08 74 05 83 F9 01 75 '
+        '87 48 89 75 E8 8B 48 50 31 DB 83 F9 05 74 09 83 F9 0A 0F 85 '
+        '79 FF FF FF'
+        ), bytes.fromhex('7456'), bytes.fromhex('9090'), 92, 6,
+        bytes.fromhex('4883c4305b415e5dc3'), 'startup disable helper return'),
+    ('ELF', 'N4', _policy_pattern(
+        '48 83 C4 08 5B 41 5E 41 5F 5D C3 83 7B 50 02',
+        '7e2e', 'ebef',
+        '49 8B 7E 18 E8 ?? ?? ?? ?? 49 89 C6 48 89 DF E8 ?? ?? ?? ?? '
+        '4C 89 F7 48 89 C6 BA 00 00 80 00 48 83 C4 08 5B 41 5E 41 5F '
+        '5D E9 ?? ?? ?? ?? 48 8B 8B 28 02 00 00 8B 41 50 80 BB 08 02 '
+        '00 00 00 75 15 8B 89 88 00 00 00 83 F9 08 77 B4 BA 0A 01 00 '
+        '00 0F A3 CA 73 AA 83 F8 0A 74 A5 83 F8 05 74 A0 EB 8D'
+        ), bytes.fromhex('7e2e'), bytes.fromhex('ebef'), 63, 0,
+        bytes.fromhex('4883c4085b415e415f5dc3'), 're-enable helper return without 0x800000'),
+    ('PE', 'N1', _policy_pattern(
+        '83 7A 50 02',
+        '7e03', '9090',
+        '31 C0 C3 48 8B 82 28 02 00 00 8B 48 50 80 BA 08 02 00 00 00 '
+        '75 19 8B 90 88 00 00 00 31 C0 83 FA 08 77 DF 41 B8 0A 01 00 '
+        '00 41 0F A3 D0 73 D3 83 F9 05 0F 95 C2 83 F9 0A 0F 95 C0 20 '
+        'D0 EB C3'
+        ), bytes.fromhex('7e03'), bytes.fromhex('9090'), 9, 6,
+        bytes.fromhex('31c0c3'), 'extension impact checker (both copies)'),
+    ('PE', 'N2', _policy_pattern(
+        '83 7F 50 02',
+        '7e38', '9090',
+        '31 FF 80 7C 24 37 00 0F 88 8A 00 00 00 48 8B 44 24 48 48 31 '
+        'E0 48 8B 0D ?? ?? ?? ?? 48 39 C1 75 0A 89 F8 48 83 C4 50 5B '
+        '5F 5E C3 48 8B 4C 24 48 48 31 E1 E8 ?? ?? ?? ?? 48 8B 8F 28 '
+        '02 00 00 8B 41 50 80 BF 08 02 00 00 00 75 17 8B 89 88 00 00 '
+        '00 31 FF 83 F9 08 77 AA BA 0A 01 00 00 0F A3 CA 73 A0 31 FF '
+        '83 F8 05 74 99 83 F8 0A 74 94 B8 00 00 80 00 EB 13 B8 00 00 '
+        '40 00 EB 0C B8 00 40 00 00 EB 05 B8 00 01 00 00 48 85 F6 74 '
+        '02 89 06 40 B7 01 E9 6B FF FF FF'
+        ), bytes.fromhex('7e38'), bytes.fromhex('9090'), 62, 6,
+        bytes.fromhex('31ff'), 'MustRemainDisabled false-result path'),
+    ('PE', 'N3', _policy_pattern(
+        '83 7A 50 02',
+        '0f8481000000', '909090909090',
+        '48 8B 84 24 80 00 00 00 48 31 E0 48 8B 0D ?? ?? ?? ?? 48 39 '
+        'C1 75 0A 48 81 C4 88 00 00 00 5F 5E C3 48 8B 8C 24 80 00 00 '
+        '00 48 31 E1 E8 ?? ?? ?? ?? 44 89 C7 E8 ?? ?? ?? ?? 48 89 C6 '
+        '48 8B 4C 24 28 E8 ?? ?? ?? ?? 48 89 F1 48 89 C2 41 B8 00 00 '
+        '80 00 E8 ?? ?? ?? ?? 40 84 FF 74 08 84 C0 0F 85 43 01 00 00 '
+        '0F B6 F0 83 C6 03 48 8B 44 24 28 48 8B 80 28 02 00 00 EB ?? '
+        '48 8D 05 ?? ?? ?? ?? EB ?? 80 BA 08 02 00 00 00 0F 85 72 FF '
+        'FF FF 48 8B 09 48 8B 82 28 02 00 00 44 8B 88 88 00 00 00 41 '
+        '83 F9 08 74 0A 41 83 F9 01 0F 85 51 FF FF FF 48 89 54 24 28 '
+        '8B 50 50 31 F6 83 FA 05 74 09 83 FA 0A 0F 85 6A FF FF FF'
+        ), bytes.fromhex('0f8481000000'), bytes.fromhex('909090909090'), 139, 10,
+        bytes.fromhex('488b842480000000'), 'startup disable helper return'),
+    ('PE', 'N4', _policy_pattern(
+        '48 83 C4 20 5B 5F 5E C3 83 7E 50 02',
+        '7e3a', 'ebf2',
+        '48 8B 7F 18 E8 ?? ?? ?? ?? 48 89 C1 48 89 FA 41 B0 01 E8 ?? '
+        '?? ?? ?? 48 89 C7 48 89 F1 E8 ?? ?? ?? ?? 48 89 F9 48 89 C2 '
+        '41 B8 00 00 80 00 48 83 C4 20 5B 5F 5E E9 ?? ?? ?? ?? 48 8B '
+        '8E 28 02 00 00 8B 41 50 80 BE 08 02 00 00 00 75 15 8B 89 88 '
+        '00 00 00 83 F9 08 77 A8 BA 0A 01 00 00 0F A3 CA 73 9E 83 F8 '
+        '0A 74 99 83 F8 05 74 94 EB 84'
+        ), bytes.fromhex('7e3a'), bytes.fromhex('ebf2'), 72, 0,
+        bytes.fromhex('4883c4205b5f5ec3'), 're-enable helper return without 0x800000'),
+]

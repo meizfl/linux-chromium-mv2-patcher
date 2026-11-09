@@ -1,0 +1,51 @@
+{
+  "source": "chrome-testing-linux-canary-159.0.8151.0",
+  "format": "ELF",
+  "size": 312122696,
+  "sha256": "65a94b4f8e5d5fc4d54e69095d3085a3aad5dbe3817ad3124176f1db47613890",
+  "windows": [
+    {
+      "kind": "N2",
+      "source_offset": "0x70f8b9d",
+      "test_offset": "0x300",
+      "patch_offset": 5,
+      "hex": "41837e50027e3e4531f6807de7000f888c0000004489f04883c4185b415e415f5dc3488d3d0a45900be83ab9e6fd85c074b5e8ecf88eff488d3df544900be867b2e6fdeba2498b8e280200008b41504180be080200000075188b89880000004531f683f90877a3ba0a0100000fa3ca73994531f683f805749183f80a748cb800008000eb0cb800400000eb05b8000040004885db7402890341b601e96affffff"
+    },
+    {
+      "kind": "N3",
+      "source_offset": "0x70faacb",
+      "test_offset": "0x500",
+      "patch_offset": 4,
+      "hex": "837e500274564883c4305b415e5dc34189d6e80ec637034889c3488b7de8e812b285ff4889df4889c6ba00008000e8a24008ff4584f6740884c00f85150100000fb6d883c303488b45e8488b8028020000eb43488d059195bdfaeb6d80be080200000075a1488b3f488b86280200008b888800000083f908740583f9017587488975e88b485031db83f905740983f90a0f8579ffffff"
+    },
+    {
+      "kind": "H",
+      "source_offset": "0xa42a8d0",
+      "test_offset": "0x700",
+      "patch_offset": 8,
+      "hex": "554889e5837f5002750a488b7f605de9ecbc0700b0015dc3"
+    },
+    {
+      "kind": "N1",
+      "source_offset": "0xa477070",
+      "test_offset": "0x900",
+      "patch_offset": 4,
+      "hex": "837e50027e0331c0c3554889e5488b86280200008b485080be080200000075178b908800000031c083fa087718be0a0100000fa3d6730e83f9050f95c283f90a0f95c020d05debc0"
+    },
+    {
+      "kind": "N4",
+      "source_offset": "0xa4771b4",
+      "test_offset": "0xb00",
+      "patch_offset": 15,
+      "hex": "4883c4085b415e415f5dc3837b50027e2e498b7e18e8621357fc4989c64889dfe827eb4dfc4c89f74889c6ba000080004883c4085b415e415f5de97d7dfeff488b8b280200008b415080bb080200000075158b898800000083f90877b4ba0a0100000fa3ca73aa83f80a74a583f80574a0eb8d"
+    },
+    {
+      "kind": "V",
+      "source_offset": "0xa4773e4",
+      "test_offset": "0xd00",
+      "patch_offset": 5,
+      "hex": "31c083ff027f1d83fe087718b90a0100000fa3f1730e83fa050f95c183fa0a0f95c020c85dc3"
+    }
+  ],
+  "download_url": "https://storage.googleapis.com/chrome-for-testing-public/159.0.8151.0/linux64/chrome-linux64.zip"
+}

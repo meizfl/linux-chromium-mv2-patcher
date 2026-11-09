@@ -67,6 +67,7 @@ from mv2profiles import (
     R158_V2,
     RWIN_V1,
     RWIN_V2,
+    R159_POLICY,
     R155_S,
     WIN_SPLIT_V5,
     WIN_SPLIT_V5_ALT,
@@ -280,6 +281,34 @@ def _win_install_policy_valid(mm, seg, start, error_rx):
 
 def find_sites(mm, segs):
     sites, rejects = [], []
+    fmt = "PE" if mm[:2] == b"MZ" else "ELF" if mm[:4] == b"\x7fELF" else "other"
+    for required_fmt, kind, rx, orig, new, detail, safe, safe_bytes, info in R159_POLICY:
+        if fmt != required_fmt:
+            continue
+        for seg in segs:
+            for m in rx.finditer(mm, seg.off, seg.off + seg.filesz):
+                jpos = m.start("j")
+                # Validate the original conditional even when inspecting the
+                # patched layout, then validate the selected safe exit.
+                original_target = decode_jump(orig, 0)
+                if (original_target is None or
+                        jpos + original_target[0] != m.start() + detail or
+                        not seg.off <= m.start() + safe < seg.off + seg.filesz or
+                        bytes(mm[m.start() + safe:m.start() + safe + len(safe_bytes)]) != safe_bytes):
+                    rejects.append((kind, m.start(), "159 policy detail/safe destinations did not validate"))
+                    continue
+                if new != b"\x90" * len(new):
+                    patched_target = decode_jump(new, 0)
+                    if patched_target is None or jpos + patched_target[0] != m.start() + safe:
+                        rejects.append((kind, m.start(), "159 policy replacement misses the safe exit"))
+                        continue
+                elif jpos + len(new) != m.start() + safe:
+                    rejects.append((kind, m.start(), "159 policy fallthrough misses the safe exit"))
+                    continue
+                cur = bytes(mm[jpos:jpos + len(orig)])
+                state = "original" if cur == orig else "patched"
+                sites.append(Site(kind, m.start(), m.end(), jpos, orig, new, state,
+                                  f"159 {info} -> vaddr 0x{vaddr_of(segs, m.start() + safe) or 0:X}"))
     for kind, rx, names in (("A", RA, ["j", "ja", "jae", "je"]),
                             ("B", RB, ["j", "ja", "jae", "je1", "je2"]),
                             ("C", RC, [])):
