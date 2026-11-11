@@ -16,11 +16,11 @@ def _byte_pattern(spec):
 
 EXPECT = {"A": 4, "B": 1, "C": 1, "D": 1, "M": 1, "S": 1, "U": 1}
 EXPECT_PROFILES = {
-    "Chrome / Chrome for Testing Canary 159.0.8151.0 Linux x86-64": {
-        "N1": 1, "N2": 1, "N3": 1, "N4": 1, "V": 1, "H": 1,
+    "Chrome / Chrome for Testing 159–160 Linux x86-64 (complete install policy)": {
+        "N1": 1, "N2": 1, "N3": 1, "N4": 1, "N5": 1, "N6": 1, "V": 1, "H": 1,
     },
     "Chrome for Testing Canary 159.0.8151.0 Windows x86-64": {
-        "N1": 2, "N2": 1, "N3": 1, "N4": 1, "V": 1,
+        "N1": 2, "N2": 1, "N3": 1, "N4": 1, "N5": 1, "N6": 1, "V": 1,
     },
     "Chromium 154-compatible ELF layout": EXPECT,
     "Chromium distro ELF layout (alternate MustRemainDisabled call encoding)": {
@@ -406,11 +406,15 @@ R155_S = re.compile(
     rb"\x48\x8b\x8b\x28\x02\x00\x00\x8b\x41\x50"
     rb"\x80\xbb\x08\x02\x00\x00\x00\x75.", F)
 
-def _policy_pattern(before, original, patched, after):
+def _policy_pattern(before, original, patched, after, legacy=None):
+    alternatives = [original, patched] + ([legacy] if legacy else [])
     return re.compile(_byte_pattern(before).pattern + b"(?P<j>" +
-                      re.escape(bytes.fromhex(original)) + b"|" +
-                      re.escape(bytes.fromhex(patched)) + b")" +
+                      b"|".join(re.escape(bytes.fromhex(value)) for value in alternatives) + b")" +
                       _byte_pattern(after).pattern, F)
+
+# Earlier profiles skipped the entire re-enable helper. Recognize those exact
+# old bytes for upgrade, but require the normal reason-removal path now.
+R159_LEGACY_REENABLE = {"ELF": bytes.fromhex('ebef'), "PE": bytes.fromhex('ebf2')}
 
 # Chrome / Chrome for Testing 159.0.8151.0: inlined policy gates.
 # Full control-flow windows preserve type/location exclusions, disable reasons,
@@ -455,14 +459,14 @@ R159_POLICY = [
         bytes.fromhex('4883c4305b415e5dc3'), 'startup disable helper return'),
     ('ELF', 'N4', _policy_pattern(
         '48 83 C4 08 5B 41 5E 41 5F 5D C3 83 7B 50 02',
-        '7e2e', 'ebef',
+        '7e2e', '9090',
         '49 8B 7E 18 E8 ?? ?? ?? ?? 49 89 C6 48 89 DF E8 ?? ?? ?? ?? '
         '4C 89 F7 48 89 C6 BA 00 00 80 00 48 83 C4 08 5B 41 5E 41 5F '
         '5D E9 ?? ?? ?? ?? 48 8B 8B 28 02 00 00 8B 41 50 80 BB 08 02 '
         '00 00 00 75 15 8B 89 88 00 00 00 83 F9 08 77 B4 BA 0A 01 00 '
         '00 0F A3 CA 73 AA 83 F8 0A 74 A5 83 F8 05 74 A0 EB 8D'
-        ), bytes.fromhex('7e2e'), bytes.fromhex('ebef'), 63, 0,
-        bytes.fromhex('4883c4085b415e415f5dc3'), 're-enable helper return without 0x800000'),
+        , legacy='ebef'), bytes.fromhex('7e2e'), bytes.fromhex('9090'), 63, 17,
+        bytes.fromhex('498b7e18'), 're-enable helper removes unsupported-manifest reason'),
     ('PE', 'N1', _policy_pattern(
         '83 7A 50 02',
         '7e03', '9090',
@@ -502,13 +506,115 @@ R159_POLICY = [
         bytes.fromhex('488b842480000000'), 'startup disable helper return'),
     ('PE', 'N4', _policy_pattern(
         '48 83 C4 20 5B 5F 5E C3 83 7E 50 02',
-        '7e3a', 'ebf2',
+        '7e3a', '9090',
         '48 8B 7F 18 E8 ?? ?? ?? ?? 48 89 C1 48 89 FA 41 B0 01 E8 ?? '
         '?? ?? ?? 48 89 C7 48 89 F1 E8 ?? ?? ?? ?? 48 89 F9 48 89 C2 '
         '41 B8 00 00 80 00 48 83 C4 20 5B 5F 5E E9 ?? ?? ?? ?? 48 8B '
         '8E 28 02 00 00 8B 41 50 80 BE 08 02 00 00 00 75 15 8B 89 88 '
         '00 00 00 83 F9 08 77 A8 BA 0A 01 00 00 0F A3 CA 73 9E 83 F8 '
         '0A 74 99 83 F8 05 74 94 EB 84'
-        ), bytes.fromhex('7e3a'), bytes.fromhex('ebf2'), 72, 0,
-        bytes.fromhex('4883c4205b5f5ec3'), 're-enable helper return without 0x800000'),
+        , legacy='ebf2'), bytes.fromhex('7e3a'), bytes.fromhex('9090'), 72, 14,
+        bytes.fromhex('488b7f18'), 're-enable helper removes unsupported-manifest reason'),
 ]
+
+# UserMayInstall's version gate precedes the outlined detail block by hundreds
+# of bytes. Match the entry and detail separately, then validate every policy
+# exclusion's return to the normal UserMayLoad/callback path in mv2ctl.py.
+# The resource IDs were checked against each official build's en-US.pak.
+R159_INSTALL = [
+    ('ELF', re.compile(
+        rb'\x49\x8b\x7f\x08\xe8....\x48\x85\xc0\x74\x0a\x83\x7b\x50\x02'
+        rb'(?P<j>\x0f\x8e....|\x90{6})'
+        rb'(?P<safe>\x4c\x8d\x65\xc0\x4c\x89\xff\x48\x89\xde\x4c\x89\xe2\xe8....)', F),
+     re.compile(
+        rb'\x48\x8b\x8b\x28\x02\x00\x00\x8b\x41\x50'
+        rb'\x80\xbb\x08\x02\x00\x00\x00\x75\x1d'
+        rb'\x8b\x89\x88\x00\x00\x00\x83\xf9\x08(?P<ja>\x0f\x87....)'
+        rb'\xba\x0a\x01\x00\x00\x0f\xa3\xca(?P<jae>\x0f\x83....)'
+        rb'\x83\xf8\x05(?P<je1>\x0f\x84....)\x83\xf8\x0a(?P<je2>\x0f\x84....)'
+        rb'\x4c\x8d\x7d\xc0\x4c\x89\xff\xbe(?P<resource>....)\xe8....'
+        rb'\x48\x8d\xbd\x40\xff\xff\xff\xc6\x47\xf8\x00', F),
+     frozenset((0x201b, 0x14c9))),
+    ('PE', re.compile(
+        rb'\x48\x85\xc0\x74\x0a\x83\x7f\x50\x02'
+        rb'(?P<j>\x0f\x8e....|\x90{6})'
+        rb'(?P<safe>\x4c\x8d\xb4\x24\x50\x02\x00\x00\x48\x89\xd9'
+        rb'\x48\x89\xfa\x4d\x89\xf0\xe8....)', F),
+     re.compile(
+        rb'\x48\x8b\x8f\x28\x02\x00\x00\x8b\x41\x50'
+        rb'\x80\xbf\x08\x02\x00\x00\x00\x75\x1d'
+        rb'\x8b\x89\x88\x00\x00\x00\x83\xf9\x08(?P<ja>\x0f\x87....)'
+        rb'\xba\x0a\x01\x00\x00\x0f\xa3\xca(?P<jae>\x0f\x83....)'
+        rb'\x83\xf8\x05(?P<je1>\x0f\x84....)\x83\xf8\x0a(?P<je2>\x0f\x84....)'
+        rb'\x4c\x8d\xb4\x24\x50\x02\x00\x00\x4c\x89\xf1'
+        rb'\xba(?P<resource>....)\xe8....\x48\x8d\x4c\x24\x60\xc6\x41\xf8\x00', F),
+     frozenset((0x200d,))),
+]
+
+# DisableAffectedExtensions: skip collecting MV2 entries for startup disable.
+# Include the complete iteration, 0x800000 insertion and outlined policy tail.
+R159_POLICY.extend([
+    ('ELF', "N6", _policy_pattern(
+        '41 BF 0A 01 00 00 48 8B 4E 38 83 79 50 02',
+        '0f8e0a010000', "909090909090",
+        '48 8B 46 08 48 85 C0 75 5C 48 89 F0 48 8B 76 10 48 3B 06 75 '
+        'F4 48 89 75 B8 48 3B 75 D0 75 D3 48 8D 7D D0 E8 ?? ?? ?? ?? '
+        '4C 8D 75 B8 4C 89 F7 E8 ?? ?? ?? ?? 48 8B 7B 18 E8 ?? ?? ?? '
+        '?? 48 89 C3 4C 8B 65 A0 48 8D 45 A8 49 39 C4 75 25 48 8B 7D '
+        'A8 E8 ?? ?? ?? ?? 48 83 C4 38 5B 41 5C 41 5D 41 5E 41 5F 5D '
+        'C3 48 89 C6 48 8B 00 48 85 C0 75 F5 EB A3 49 BD C5 E5 52 64 '
+        'EE BD 04 05 49 8B 7C 24 20 E8 ?? ?? ?? ?? 49 89 C7 BF 04 00 '
+        '00 00 4C 89 EE E8 ?? ?? ?? ?? 48 89 45 B8 B9 01 00 00 00 48 '
+        '89 4D C8 C7 00 00 00 80 00 48 89 4D C0 48 8D 50 04 4C 89 F7 '
+        '48 89 C6 E8 ?? ?? ?? ?? 48 89 DF 4C 89 FE 4C 89 F2 E8 ?? ?? '
+        '?? ?? 4C 89 75 D0 48 8D 7D D0 E8 ?? ?? ?? ?? 49 8B 44 24 08 '
+        '48 85 C0 74 19 49 89 C4 48 8B 00 48 85 C0 75 F5 48 8D 45 A8 '
+        '49 39 C4 75 87 E9 53 FF FF FF 4C 89 E0 4D 8B 64 24 10 49 3B '
+        '04 24 75 F2 EB E2 48 8B 91 28 02 00 00 8B 42 50 80 B9 08 02 '
+        '00 00 00 75 19 8B 8A 88 00 00 00 83 F9 08 0F 87 D4 FE FF FF '
+        '41 0F A3 CF 0F 83 CA FE FF FF 83 F8 05 0F 84 C1 FE FF FF 83 '
+        'F8 0A 0F 84 B8 FE FF FF 48 83 C6 38 4C 89 F7 E8 ?? ?? ?? ?? '
+        '48 8B 75 B8 E9 A3 FE FF FF'
+        ), bytes.fromhex('0f8e0a010000'), b"\x90" * 6, 286, 20,
+        bytes.fromhex('488b4608'), "DisableAffectedExtensions next-item path"),
+    ('PE', "N6", _policy_pattern(
+        'BA 0A 01 00 00 4C 8B 49 38 41 83 79 50 02',
+        '0f8e44020000', "909090909090",
+        '4C 8B 41 08 4D 85 C0 0F 85 F6 00 00 00 49 89 C8 48 8B 49 10 '
+        '4C 3B 01 75 F4 48 39 C1 75 D3 48 8B 5E 18 E8 ?? ?? ?? ?? 48 '
+        '89 C1 48 89 DA 41 B0 01 E8 ?? ?? ?? ?? 48 8B 6C 24 48 4C 39 '
+        'FD 0F 85 53 01 00 00 48 8B 4C 24 50 E8 ?? ?? ?? ?? 48 8B 0D '
+        '?? ?? ?? ?? 48 8B 56 18 48 8B 01 48 8B 80 38 03 00 00 FF 15 '
+        '?? ?? ?? ?? 84 C0 74 5D 48 8B 4E 18 E8 ?? ?? ?? ?? 48 89 C7 '
+        '48 89 74 24 48 4C 8B 70 08 48 8D 58 10 49 39 DE 74 2E 48 8D '
+        '74 24 48 49 8B 56 38 48 89 F1 41 B0 01 E8 ?? ?? ?? ?? 49 8B '
+        '46 08 48 85 C0 75 6C 4C 89 F0 4D 8B 76 10 49 3B 06 75 F4 49 '
+        '39 DE 75 D7 48 8B 5F 28 48 83 C7 30 48 39 FB 0F 85 8D 00 00 '
+        '00 48 8B 44 24 68 48 31 E0 48 8B 0D ?? ?? ?? ?? 48 39 C1 75 '
+        '19 0F 28 74 24 70 48 81 C4 88 00 00 00 5B 5D 5F 5E 41 5C 41 '
+        '5D 41 5E 41 5F C3 48 8B 4C 24 68 48 31 E1 E8 ?? ?? ?? ?? 4C '
+        '89 C1 4D 8B 00 4D 85 C0 75 F5 E9 06 FF FF FF 49 89 C6 48 8B '
+        '00 48 85 C0 75 F5 EB 93 48 8B 57 38 48 89 F1 E8 ?? ?? ?? ?? '
+        '48 8B 47 08 48 85 C0 74 10 48 89 C7 48 8B 00 48 85 C0 75 F5 '
+        'E9 ?? ?? ?? ?? 48 89 F8 48 8B 7F 10 48 3B 07 75 F4 E9 ?? ?? '
+        '?? ?? 48 8D 74 24 48 48 8B 53 38 48 89 F1 45 31 C0 E8 ?? ?? '
+        '?? ?? 48 8B 43 08 48 85 C0 74 15 48 89 C3 48 8B 00 48 85 C0 '
+        '75 F5 48 39 FB 75 D8 E9 41 FF FF FF 48 89 D8 48 8B 5B 10 48 '
+        '3B 03 75 F4 EB E8 BB 01 00 00 00 4C 8D 74 24 40 4D 89 FC B9 '
+        '04 00 00 00 48 BA C5 E5 52 64 EE BD 04 05 49 89 C7 E8 ?? ?? '
+        '?? ?? 48 89 44 24 28 48 89 5C 24 38 C7 00 00 00 80 00 48 89 '
+        '5C 24 30 4C 8D 40 04 48 89 F9 48 89 C2 E8 ?? ?? ?? ?? 48 8B '
+        '4D 20 E8 ?? ?? ?? ?? 4D 89 FD 4C 89 F9 48 89 C2 49 89 F8 E8 '
+        '?? ?? ?? ?? 48 89 7C 24 40 4C 89 F1 E8 ?? ?? ?? ?? 48 89 E8 '
+        '48 8B 4D 08 48 85 C9 74 22 48 89 C8 48 8B 09 48 85 C9 75 F5 '
+        '4D 89 E7 48 89 C5 4C 39 E0 4C 89 E8 0F 85 72 FF FF FF E9 10 '
+        'FE FF FF 48 89 C1 48 8B 50 10 48 89 D0 48 3B 0A 75 F1 EB D8 '
+        '4D 8B 91 28 02 00 00 45 8B 42 50 41 80 B9 08 02 00 00 00 75 '
+        '1B 45 8B 8A 88 00 00 00 41 83 F9 08 0F 87 96 FD FF FF 44 0F '
+        'A3 CA 0F 83 8C FD FF FF 41 83 F8 05 0F 84 82 FD FF FF 41 83 '
+        'F8 0A 0F 84 78 FD FF FF 4C 8D 41 38 49 89 CC 48 89 D9 4C 89 '
+        'F2 49 89 C5 E8 ?? ?? ?? ?? BA 0A 01 00 00 4C 89 E1 4C 89 E8 '
+        'E9 53 FD FF FF'
+        ), bytes.fromhex('0f8e44020000'), b"\x90" * 6, 600, 20,
+        bytes.fromhex('4c8b4108'), "DisableAffectedExtensions next-item path"),
+])

@@ -68,6 +68,8 @@ from mv2profiles import (
     RWIN_V1,
     RWIN_V2,
     R159_POLICY,
+    R159_LEGACY_REENABLE,
+    R159_INSTALL,
     R155_S,
     WIN_SPLIT_V5,
     WIN_SPLIT_V5_ALT,
@@ -282,6 +284,31 @@ def _win_install_policy_valid(mm, seg, start, error_rx):
 def find_sites(mm, segs):
     sites, rejects = [], []
     fmt = "PE" if mm[:2] == b"MZ" else "ELF" if mm[:4] == b"\x7fELF" else "other"
+    for required_fmt, entry_rx, detail_rx, resources in R159_INSTALL:
+        if fmt != required_fmt:
+            continue
+        for seg in segs:
+            for entry in entry_rx.finditer(mm, seg.off, seg.off + seg.filesz):
+                jpos, safe = entry.start("j"), entry.start("safe")
+                details = list(detail_rx.finditer(mm, entry.end(),
+                               min(jpos + 0x400, seg.off + seg.filesz)))
+                if len(details) != 1:
+                    rejects.append(("N5", entry.start(), "UserMayInstall requires one complete MV2 error block"))
+                    continue
+                detail = details[0]
+                resource = struct.unpack_from("<I", mm, detail.start("resource"))[0]
+                exits = [decode_jump(mm, detail.start(name)) for name in ("ja", "jae", "je1", "je2")]
+                cur = bytes(mm[jpos:jpos + 6])
+                original = b"\x0f\x8e" + struct.pack("<i", detail.start() - jpos - 6)
+                if (resource not in resources or
+                        any(exit is None or exit[0] != safe for exit in exits) or
+                        cur not in (original, b"\x90" * 6)):
+                    rejects.append(("N5", entry.start(),
+                                    "UserMayInstall manifest/error/policy destinations did not validate"))
+                    continue
+                state = "original" if cur == original else "patched"
+                sites.append(Site("N5", entry.start(), detail.end(), jpos, original, b"\x90" * 6,
+                                  state, f"UserMayInstall normal policy path -> vaddr 0x{vaddr_of(segs, safe) or 0:X}"))
     for required_fmt, kind, rx, orig, new, detail, safe, safe_bytes, info in R159_POLICY:
         if fmt != required_fmt:
             continue
@@ -306,8 +333,9 @@ def find_sites(mm, segs):
                     rejects.append((kind, m.start(), "159 policy fallthrough misses the safe exit"))
                     continue
                 cur = bytes(mm[jpos:jpos + len(orig)])
-                state = "original" if cur == orig else "patched"
-                sites.append(Site(kind, m.start(), m.end(), jpos, orig, new, state,
+                legacy = kind == "N4" and cur == R159_LEGACY_REENABLE.get(fmt)
+                state = "original" if cur == orig or legacy else "patched"
+                sites.append(Site(kind, m.start(), m.end(), jpos, cur if legacy else orig, new, state,
                                   f"159 {info} -> vaddr 0x{vaddr_of(segs, m.start() + safe) or 0:X}"))
     for kind, rx, names in (("A", RA, ["j", "ja", "jae", "je"]),
                             ("B", RB, ["j", "ja", "jae", "je1", "je2"]),
@@ -1060,10 +1088,22 @@ def discover(mm, segs, sites):
             if inside(o):
                 continue
             win = bytes(mm[o:o + 160])
+            outlined = None
+            if not (b"\x28\x02\x00\x00" in win and b"\x88\x00\x00\x00" in win):
+                # LTO can move UserMayInstall's detailed MV2 exclusions well
+                # beyond the local diagnostic window. Follow the version
+                # branch, without treating this clue as patch authorization.
+                branch = decode_jump(mm, o + 4) if o + 10 <= s.off + s.filesz else None
+                if branch and s.off <= branch[0] < min(o + 0x1000, s.off + s.filesz):
+                    target_win = bytes(mm[branch[0]:branch[0] + 160])
+                    if b"\x28\x02\x00\x00" in target_win and b"\x88\x00\x00\x00" in target_win:
+                        win, outlined = target_win, branch[0]
             if b"\x28\x02\x00\x00" in win and b"\x88\x00\x00\x00" in win:
                 if shown < 25:
                     st = o - 1 if o and mm[o - 1] == 0x41 else o
                     dump(mm, segs, st, 0, 168, f"resembles a check (cmp [reg+0x50],2) #{shown + 1}")
+                    if outlined is not None:
+                        dump(mm, segs, outlined, 0, 168, "out-of-line MV2 policy block (version-branch target)")
                 shown += 1
     print(f"[similar cmp sites outside known patterns: {shown}]\n")
 
