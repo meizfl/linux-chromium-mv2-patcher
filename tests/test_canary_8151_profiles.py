@@ -13,7 +13,9 @@ import mv2ctl as ctl
 class Canary8151ProfileTests(unittest.TestCase):
     def cases(self):
         fixtures = Path(__file__).parent / 'fixtures'
-        paths = list(fixtures.glob('*159.0.8151.0.json')) + list(fixtures.glob('*160.0.8155.0.json'))
+        paths = (list(fixtures.glob('*159.0.8151.0.json')) +
+                 list(fixtures.glob('*159.0.8154.2.json')) +
+                 list(fixtures.glob('*160.0.8155.0.json')))
         for path in sorted(paths):
             fixture = json.loads(path.read_text())
             data = bytearray(b'\xcc' * 0x2000)
@@ -49,7 +51,7 @@ class Canary8151ProfileTests(unittest.TestCase):
 
     def test_complete_profiles_and_verified_copy(self):
         cases = list(self.cases())
-        self.assertEqual(len(cases), 4)
+        self.assertEqual(len(cases), 6)
         for fixture, data in cases:
             with self.subTest(build=fixture['source']), tempfile.TemporaryDirectory() as directory:
                 sites, status, _ = self.analyze(data)
