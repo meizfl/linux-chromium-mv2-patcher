@@ -109,20 +109,25 @@ def profile_matches(counts, expected, repeatable=()):
 
 
 def unique_sites(sites):
-    """Deduplicate proofs of one instruction, never overlapping code windows."""
-    found, rejects = {}, []
+    """Deduplicate each role proof; allow identical edits shared by legacy roles."""
+    found, roles, rejects = {}, {}, []
     for site in sites:
         previous = found.get(site.jpos)
         if previous is None:
             found[site.jpos] = site
-        elif (previous.kind, previous.orig, previous.new, previous.state) != (
-                site.kind, site.orig, site.new, site.state):
+        elif (previous.orig, previous.new, previous.state) != (
+                site.orig, site.new, site.state):
             rejects.append((site.kind, site.jpos, 'conflicting proofs for one branch'))
-    result = sorted(found.values(), key=lambda site: site.jpos)
-    for left, right in zip(result, result[1:]):
+            continue
+        # Legacy profiles count independently validated roles that can share
+        # one instruction (e.g. M and D). Preserve those landmarks, but collapse
+        # duplicate proofs of the same role. The writer deduplicates edits.
+        roles.setdefault((site.jpos, site.kind), site)
+    edits = sorted(found.values(), key=lambda site: site.jpos)
+    for left, right in zip(edits, edits[1:]):
         if right.jpos < left.jpos + max(len(left.orig), len(left.new)):
             rejects.append((right.kind, right.jpos, 'validated edits overlap instruction bytes'))
-    return result, rejects
+    return sorted(roles.values(), key=lambda site: (site.jpos, site.kind)), rejects
 
 
 # Seed instructions, not function prologues. Include REX, disp32 and SIB forms;
