@@ -1,7 +1,8 @@
 """Validated Chromium binary signatures and expected site counts.
 
 Add a profile only after confirming every matched branch target against its
-control flow. The patching and validation algorithms live in mv2ctl.py.
+control flow. Block association and coverage live in mv2flow.py; command and patch-writing
+logic lives in mv2ctl.py.
 """
 import re
 
@@ -19,7 +20,7 @@ EXPECT_PROFILES = {
     "Chrome / Chrome for Testing 159–160 Linux x86-64 (complete install policy)": {
         "N1": 1, "N2": 1, "N3": 1, "N4": 1, "N5": 1, "N6": 1, "V": 1, "H": 1,
     },
-    "Chrome for Testing Canary 159.0.8151.0 / 8154.2 Windows x86-64": {
+    "Chrome / Chrome for Testing 159–160 Windows x86-64 (complete MV2 policy)": {
         "N1": 2, "N2": 1, "N3": 1, "N4": 1, "N5": 1, "N6": 1, "V": 1,
     },
     "Chromium 154-compatible ELF layout": EXPECT,
@@ -101,6 +102,15 @@ EXPECT_PROFILES = {
         "W1": 2, "W2": 1, "W3": 1, "W4": 1, "W5": 0, "W5_156": 1,
         "W5_157": 0, "W5_158": 0, "W5_158_8106": 0, "W6": 1,
     },
+}
+
+# Modern profiles specify required roles/copy minima. Additional copies are
+# permitted only when each block has its own complete proof and the coverage
+# audit finds no remaining unclassified MV2 gates. Legacy profiles stay exact.
+REPEATABLE_PROFILE_ROLES = {
+    name: frozenset(('N1', 'N2', 'N3', 'N4', 'N5', 'N6', 'V'))
+    for name, expected in EXPECT_PROFILES.items()
+    if {'N1', 'N2', 'N3', 'N4', 'N5', 'N6'} <= expected.keys()
 }
 
 # ------------------------------------------------------------------ regex patterns
@@ -523,7 +533,9 @@ R159_POLICY = [
 # The resource IDs were checked against each official build's en-US.pak.
 R159_INSTALL = [
     ('ELF', re.compile(
-        rb'\x49\x8b\x7f\x08\xe8....\x48\x85\xc0\x74\x0a\x83\x7b\x50\x02'
+        rb'(?:\x49\x8b\x7f\x08\xe8....|'
+        rb'\x4d\x8b\x67\x08\xe8....\x48\x8d\x3d....\x4c\x89\xe6\xba\x01\x00\x00\x00\xe8....)'
+        rb'\x48\x85\xc0\x74\x0a\x83\x7b\x50\x02'
         rb'(?P<j>\x0f\x8e....|\x90{6})'
         rb'(?P<safe>\x4c\x8d\x65\xc0\x4c\x89\xff\x48\x89\xde\x4c\x89\xe2\xe8....)', F),
      re.compile(
@@ -534,7 +546,7 @@ R159_INSTALL = [
         rb'\x83\xf8\x05(?P<je1>\x0f\x84....)\x83\xf8\x0a(?P<je2>\x0f\x84....)'
         rb'\x4c\x8d\x7d\xc0\x4c\x89\xff\xbe(?P<resource>....)\xe8....'
         rb'\x48\x8d\xbd\x40\xff\xff\xff\xc6\x47\xf8\x00', F),
-     frozenset((0x201b, 0x14c9, 0x1b03))),
+     frozenset((0x201b, 0x14c9, 0x1b03, 0x14c3))),
     ('PE', re.compile(
         rb'\x48\x85\xc0\x74\x0a\x83\x7f\x50\x02'
         rb'(?P<j>\x0f\x8e....|\x90{6})'
@@ -548,7 +560,7 @@ R159_INSTALL = [
         rb'\x83\xf8\x05(?P<je1>\x0f\x84....)\x83\xf8\x0a(?P<je2>\x0f\x84....)'
         rb'\x4c\x8d\xb4\x24\x50\x02\x00\x00\x4c\x89\xf1'
         rb'\xba(?P<resource>....)\xe8....\x48\x8d\x4c\x24\x60\xc6\x41\xf8\x00', F),
-     frozenset((0x200d, 0x1af5))),
+     frozenset((0x200d, 0x1af5, 0x14bb, 0x14b5))),
 ]
 
 # DisableAffectedExtensions: skip collecting MV2 entries for startup disable.
@@ -690,4 +702,104 @@ R159_POLICY.extend([
         '0A 01 00 00 4C 89 E1 4C 89 E8 E9 19 FB FF FF'
         ), bytes.fromhex('0f8e7e040000'), b"\x90" * 6, 1170, 20,
         bytes.fromhex('4c8b4108'), "DisableAffectedExtensions next-item path"),
+])
+
+# Chrome Canary Linux 160.0.8156.0: new register allocation and TLS setup.
+R159_POLICY.extend([
+    ("ELF", 'N2', _policy_pattern(
+        '83 7E 50 02',
+        '7e17', '9090',
+        '45 31 F6 80 7D E7 00 78 66 44 89 F0 48 83 C4 18 5B 41 5E 41 '
+        '5F 5D C3 49 8B 8E 28 02 00 00 8B 41 50 41 80 BE 08 02 00 00 '
+        '00 75 18 8B 89 88 00 00 00 45 31 F6 83 F9 08 77 CA BA 0A 01 '
+        '00 00 0F A3 CA 73 C0 45 31 F6 83 F8 05 74 B8 83 F8 0A 74 B3 '
+        'B8 00 00 80 00 EB 0C B8 00 40 00 00 EB 05 B8 00 00 40 00 48 '
+        '85 DB 74 02 89 03 41 B6 01 EB 94'
+        ), bytes.fromhex('7e17'), bytes.fromhex('9090'), 29, 6,
+        bytes.fromhex('4531f680'), 'MustRemainDisabled false-result path'),
+    ("ELF", 'N4', _policy_pattern(
+        '48 83 C4 08 5B 41 5E 41 5F 5D C3 83 7B 50 02',
+        '7e3e', '9090',
+        '4D 8B 76 18 E8 ?? ?? ?? ?? 48 89 C7 4C 89 F6 BA 01 00 00 00 '
+        'E8 ?? ?? ?? ?? 49 89 C6 48 89 DF E8 ?? ?? ?? ?? 4C 89 F7 48 '
+        '89 C6 BA 00 00 80 00 48 83 C4 08 5B 41 5E 41 5F 5D E9 ?? ?? '
+        '?? ?? 48 8B 8B 28 02 00 00 8B 41 50 80 BB 08 02 00 00 00 75 '
+        '15 8B 89 88 00 00 00 83 F9 08 77 A4 BA 0A 01 00 00 0F A3 CA '
+        '73 9A 83 F8 0A 74 95 83 F8 05 74 90 E9 7A FF FF FF'
+        , legacy='ebef'), bytes.fromhex('7e3e'), bytes.fromhex('9090'), 79, 17,
+        bytes.fromhex('4d8b7618'), 're-enable helper removes unsupported-manifest reason'),
+    ("ELF", 'N6', _policy_pattern(
+        '41 BF 0A 01 00 00 49 8B 55 38 83 7A 50 02',
+        '0f8e09050000', '909090909090',
+        '49 8B 4D 08 48 85 C9 0F 85 C5 03 00 00 4C 89 E9 4D 8B 6D 10 '
+        '49 3B 4D 00 75 F3 49 39 C5 75 D3 4C 8B 7B 18 E8 ?? ?? ?? ?? '
+        '48 89 C7 4C 89 FE BA 01 00 00 00 E8 ?? ?? ?? ?? 4C 8B 7D B8 '
+        '4D 39 E7 0F 85 26 04 00 00 48 8B 7D C0 E8 ?? ?? ?? ?? 48 8B '
+        '3D ?? ?? ?? ?? 48 8B 07 48 8D 0D ?? ?? ?? ?? 48 29 C1 48 C1 '
+        'C9 05 48 83 F9 1D 0F 87 B8 03 00 00 BA 01 00 00 20 0F A3 CA '
+        '0F 83 AA 03 00 00 48 8B 73 18 FF 90 40 03 00 00 84 C0 0F 84 '
+        '81 00 00 00 4C 8B 73 18 80 3D ?? ?? ?? ?? 00 0F 84 61 01 00 '
+        '00 48 8D 3D ?? ?? ?? ?? 4C 89 F6 BA 01 00 00 00 E8 ?? ?? ?? '
+        '?? 49 89 C6 48 89 5D B8 4C 8B 60 08 4C 8D 78 10 4D 39 FC 74 '
+        '37 48 8D 5D B8 49 8B 74 24 38 48 89 DF BA 01 00 00 00 E8 ?? '
+        '?? ?? ?? 49 8B 44 24 08 48 85 C0 0F 85 F5 02 00 00 4C 89 E0 '
+        '4D 8B 64 24 10 49 3B 04 24 75 F2 4D 39 FC 75 CD 4D 8B 7E 20 '
+        '49 83 C6 28 4D 39 F7 0F 85 1C 03 00 00 48 83 C4 48 5B 41 5C '
+        '41 5D 41 5E 41 5F 5D C3 48 8D 3D ?? ?? ?? ?? E8 ?? ?? ?? ?? '
+        '85 C0 0F 84 2A FE FF FF E8 ?? ?? ?? ?? 49 89 C7 48 8D 05 ?? '
+        '?? ?? ?? 48 89 05 ?? ?? ?? ?? 48 B8 00 00 00 00 FC FF FF FF '
+        '4C 21 F8 48 3B 05 ?? ?? ?? ?? 0F 84 FD 03 00 00 4C 89 3D ?? '
+        '?? ?? ?? 48 8D 35 ?? ?? ?? ?? 48 8D 05 ?? ?? ?? ?? 48 89 05 '
+        '?? ?? ?? ?? C7 05 ?? ?? ?? ?? 00 00 00 00 4C 89 FF E8 ?? ?? '
+        '?? ?? 0F 57 C0 0F 11 05 ?? ?? ?? ?? 48 C7 05 ?? ?? ?? ?? 00 '
+        '00 00 00 48 8D 05 ?? ?? ?? ?? 48 89 05 ?? ?? ?? ?? C6 05 ?? '
+        '?? ?? ?? 01 B0 01 86 05 ?? ?? ?? ?? A8 04 0F 84 92 FD FF FF '
+        '48 8D 05 ?? ?? ?? ?? 48 39 05 ?? ?? ?? ?? 0F 85 A8 03 00 00 '
+        '48 8D 35 ?? ?? ?? ?? BF CA 00 00 00 BA 01 00 00 00 B9 FF FF '
+        'FF 7F 31 C0 E8 ?? ?? ?? ?? E9 ?? ?? ?? ?? 48 8D 3D ?? ?? ?? '
+        '?? E8 ?? ?? ?? ?? 85 C0 0F 84 8B FE FF FF E8 ?? ?? ?? ?? 49 '
+        '89 C7 48 8D 05 ?? ?? ?? ?? 48 89 05 ?? ?? ?? ?? 48 B8 00 00 '
+        '00 00 FC FF FF FF 4C 21 F8 48 3B 05 ?? ?? ?? ?? 0F 84 35 03 '
+        '00 00 4C 89 3D ?? ?? ?? ?? 48 8D 35 ?? ?? ?? ?? 48 8D 05 ?? '
+        '?? ?? ?? 48 89 05 ?? ?? ?? ?? C7 05 ?? ?? ?? ?? 00 00 00 00 '
+        '4C 89 FF E8 ?? ?? ?? ?? 0F 57 C0 0F 11 05 ?? ?? ?? ?? 48 C7 '
+        '05 ?? ?? ?? ?? 00 00 00 00 48 8D 05 ?? ?? ?? ?? 48 89 05 ?? '
+        '?? ?? ?? C6 05 ?? ?? ?? ?? 01 B0 01 86 05 ?? ?? ?? ?? A8 04 '
+        '0F 84 F3 FD FF FF 48 8D 05 ?? ?? ?? ?? 48 39 05 ?? ?? ?? ?? '
+        '0F 85 D0 02 00 00 48 8D 35 ?? ?? ?? ?? BF CA 00 00 00 BA 01 '
+        '00 00 00 B9 FF FF FF 7F 31 C0 E8 ?? ?? ?? ?? E9 BD FD FF FF '
+        '48 8D 3D ?? ?? ?? ?? 49 89 F5 E8 ?? ?? ?? ?? 4C 89 EE 85 C0 '
+        '0F 84 C5 FC FF FF E8 ?? ?? ?? ?? 49 89 C7 48 8D 05 ?? ?? ?? '
+        '?? 48 89 05 ?? ?? ?? ?? 48 B8 00 00 00 00 FC FF FF FF 4C 21 '
+        'F8 48 3B 05 ?? ?? ?? ?? 0F 84 40 02 00 00 4C 89 3D ?? ?? ?? '
+        '?? 48 8D 35 ?? ?? ?? ?? 48 8D 05 ?? ?? ?? ?? 48 89 05 ?? ?? '
+        '?? ?? C7 05 ?? ?? ?? ?? 00 00 00 00 4C 89 FF E8 ?? ?? ?? ?? '
+        '0F 57 C0 0F 11 05 ?? ?? ?? ?? 48 C7 05 ?? ?? ?? ?? 00 00 00 '
+        '00 48 8D 05 ?? ?? ?? ?? 48 89 05 ?? ?? ?? ?? C6 05 ?? ?? ?? '
+        '?? 01 B0 01 86 05 ?? ?? ?? ?? A8 04 4C 89 EE 0F 84 2A FC FF '
+        'FF 48 8D 05 ?? ?? ?? ?? 48 39 05 ?? ?? ?? ?? 0F 85 E0 01 00 '
+        '00 48 8D 35 ?? ?? ?? ?? BF CA 00 00 00 BA 01 00 00 00 B9 FF '
+        'FF FF 7F 31 C0 E8 ?? ?? ?? ?? 4C 89 EE E9 ?? ?? ?? ?? 49 89 '
+        'CD 48 8B 09 48 85 C9 75 F5 E9 38 FC FF FF 49 89 C4 48 8B 00 '
+        '48 85 C0 75 F5 E9 09 FD FF FF 49 8B 76 38 48 89 DF E8 ?? ?? '
+        '?? ?? 49 8B 46 08 48 85 C0 74 10 49 89 C6 48 8B 00 48 85 C0 '
+        '75 F5 E9 ?? ?? ?? ?? 4C 89 F0 4D 8B 76 10 49 3B 06 75 F4 E9 '
+        '?? ?? ?? ?? 67 0F B9 40 02 48 8D 5D B8 49 8B 77 38 48 89 DF '
+        '31 D2 E8 ?? ?? ?? ?? 49 8B 47 08 48 85 C0 74 15 49 89 C7 48 '
+        '8B 00 48 85 C0 75 F5 4D 39 F7 75 D9 E9 B4 FC FF FF 4C 89 F8 '
+        '4D 8B 7F 10 49 3B 07 75 F4 EB E8 49 8B 7F 20 49 89 C5 E8 ?? '
+        '?? ?? ?? 48 89 45 B0 BF 04 00 00 00 48 BE C5 E5 52 64 EE BD '
+        '04 05 E8 ?? ?? ?? ?? 48 89 45 90 B9 01 00 00 00 48 89 4D A0 '
+        'C7 00 00 00 80 00 48 89 4D 98 48 8D 50 04 4C 89 F7 48 89 C6 '
+        'E8 ?? ?? ?? ?? 4C 89 6D D0 4C 89 EF 48 8B 75 B0 4C 89 F2 E8 '
+        '?? ?? ?? ?? 4C 89 75 A8 48 8D 7D A8 E8 ?? ?? ?? ?? 49 8B 47 '
+        '08 48 85 C0 74 1D 49 89 C7 48 8B 00 48 85 C0 75 F5 4D 39 E7 '
+        '48 8B 45 D0 0F 85 75 FF FF FF E9 4A FB FF FF 4C 89 F8 4D 8B '
+        '7F 10 49 3B 07 75 F4 EB E0 48 8B B2 28 02 00 00 8B 4E 50 80 '
+        'BA 08 02 00 00 00 75 19 8B 96 88 00 00 00 83 FA 08 0F 87 D5 '
+        'FA FF FF 41 0F A3 D7 0F 83 CB FA FF FF 83 F9 05 0F 84 C2 FA '
+        'FF FF 83 F9 0A 0F 84 B9 FA FF FF 49 8D 75 38 48 8D 7D B8 48 '
+        '89 45 D0 E8 ?? ?? ?? ?? 48 8B 45 D0 E9 9F FA FF FF'
+        ), bytes.fromhex('0f8e09050000'), bytes.fromhex('909090909090'), 1309, 20,
+        bytes.fromhex('498b4d08'), 'DisableAffectedExtensions next-item path'),
 ])

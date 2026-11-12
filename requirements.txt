@@ -1,2 +1,2 @@
-# Optional for instruction-level semantic diagnostics on unknown Chromium builds.
+# Required for modern MV2 block coverage; also enables semantic diagnostics.
 capstone>=5.0,<6

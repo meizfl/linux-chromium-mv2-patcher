@@ -49,6 +49,32 @@ class BuilderTests(unittest.TestCase):
         self.assertIn(b'ap="x64-beta"', fetch.call_args.args[1])
         self.assertEqual(release.checksum, 'abcd')
 
+    def test_regular_windows_canary_uses_its_own_omaha_app_and_default_target(self):
+        data = b'''<response><app><updatecheck status="ok"><urls>
+          <url codebase="https://dl.google.com/release2/chrome/canary/"/></urls>
+          <manifest version="160.0.8155.0"><packages><package name="full.exe"
+          hash_sha256="abcd"/></packages></manifest></updatecheck></app></response>'''
+        self.assertIn('chrome-win64-canary', builder.TARGETS)
+        self.assertIn('chrome-win64-canary', builder.DEFAULT_TARGETS)
+        with patch.object(builder, 'fetch', return_value=data) as fetch:
+            release = builder.resolve('chrome-win64-canary')
+        self.assertIn(b'appid="{4EA16AC7-FD5A-47C3-875B-DBF4A2008C20}"', fetch.call_args.args[1])
+        self.assertIn(b'ap="x64-canary"', fetch.call_args.args[1])
+        self.assertEqual(release.kind, 'exe')
+        self.assertEqual(release.checksum, 'abcd')
+        self.assertEqual(release.filename, 'chrome-win64-160.0.8155.0-canary.tar.zst')
+
+    def test_block_analysis_changes_invalidate_cached_archives(self):
+        source = self.root / 'builder'
+        source.mkdir()
+        for path in builder.HERE.glob('*.py'):
+            shutil.copy2(path, source / path.name)
+        with patch.object(builder, 'HERE', source):
+            before = builder.builder_fingerprint()
+            flow = source / 'mv2flow.py'
+            flow.write_text(flow.read_text() + '\n# Different block analysis.\n')
+            self.assertNotEqual(builder.builder_fingerprint(), before)
+
     def test_arch_compares_versions_not_dates_and_uses_matching_checksum(self):
         stable = dict(epoch=0, pkgver='156.0.8078.79', pkgrel='9', filename='stable.pkg.tar.zst', repo='extra')
         testing = dict(epoch=0, pkgver='157.0.8100.1', pkgrel='1', filename='testing.pkg.tar.zst', repo='extra-testing')

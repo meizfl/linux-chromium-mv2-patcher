@@ -30,18 +30,29 @@ The binary rules in `mv2ctl.py` currently have independently validated ELF profi
 
 - Chrome for Testing Canary 159.0.8154.2 Linux and Windows x86-64 validate the complete seven/eight-edit profiles. Their unsupported-manifest resources are 6915 (`0x1B03`) and 6901 (`0x1AF5`). The Windows startup loop includes additional TLS-initialization blocks and has a separately validated full control-flow window. Both official binaries passed copy-patching and post-write analysis. On Linux, the supplied uBlock 1.75.0 recovered from reason `0x800000` and blocked a test script after two further restarts without reinstallation; an unfiltered control script loaded. Real instruction fixtures cover the complete and partial states and reject changed policy exits, error resources and disable reasons.
 
+- Regular Google Chrome Canary 160.0.8155.0 Windows x64 is available as `chrome-win64-canary` and is included in default builder targets. It uses the Canary Omaha app GUID, a full x64 installer and the upstream SHA256. Its complete eight-edit MV2 profile includes unsupported-manifest resource 5307 (`0x14BB`) and the validated startup loop. Build it with `python3 mv2build.py --target chrome-win64-canary`; Chrome for Testing retains the separate `chrome-testing-win64-canary` target.
+
+- Google Chrome Canary 160.0.8156.0 Linux and Windows x64 validate seven/eight edits. Linux has separate verified `MustRemainDisabled`, native re-enable, and startup-loop windows with additional TLS setup; its outlined install-error block requires a larger bounded search and resource 5315 (`0x14C3`). Windows uses resource 5301 (`0x14B5`). Both official downloads passed SHA256 validation, copy-patching, post-write analysis and archive building. The supplied uBlock 1.75.0 installed on Linux, recovered from reason `0x800000`, and blocked a test script after two further restarts without reinstallation; the control script loaded. Windows 160.0.8156.1 is not covered by this validation.
+
 `ContentHash::ShouldComputeHashesForResource` is never patched: for signed hashes it intentionally selects only resources with a signed tree-hash root. If an older patch changed this gate, analysis rejects the binary; restore from its verified `.mv2orig` and apply the current patcher again.
 
-Each profile has its own expected site counts and checks branch destinations before editing. Unknown or mixed layouts fail closed. Other builds, including later Canary versions, are not automatically assumed compatible; run `analyze` after each browser update and add a profile only after validating its control flow.
+Each profile checks branch destinations before editing. Legacy profiles require exact site counts. Modern gate families require every mandatory role and checker copy, while allowing additional independently validated blocks of the same role. Unknown layouts fail closed. Other builds, including later Canary versions, are not automatically assumed compatible; run `analyze` after each browser update and add a profile only after validating its control flow.
 
 On an unknown or partly recognized build, `analyze` also runs an instruction-level semantic scan when Capstone is installed (`python3 -m pip install -r requirements.txt`). It searches decoded x86-64 instructions for manifest-version comparisons and nearby MV2 dataflow landmarks while tolerating register allocation and branch-encoding differences. Rejected signature anchors are decoded directly as well, so their control flow and rejection reason remain visible even when a linear sweep loses instruction alignment. Diagnostics also follow manifest-version branches to outlined policy blocks beyond the local byte window. These candidates are diagnostic only; applying still requires a validated profile and verified control-flow targets. This keeps unfamiliar distro builds fail-closed while making profile development less dependent on exact byte strings.
 
-The binary signatures and expected site counts are kept in [mv2profiles.py](./mv2profiles.py), separate from the patching logic in `mv2ctl.py`. Add a new build there only after confirming every candidate and branch destination.
+### Independent blocks and coverage
+
+The unit of patching is an individual branch, not a function entry. Multiple MV2 gates inside one function are collected independently. Install gates are linked to their outlined error blocks by their actual branch targets and shared safe policy exits; the search does not require one error block in a fixed forward window. Patched gates are recognized only when their original association can be reconstructed uniquely. Orphan error blocks, ambiguous associations, conflicting proofs, and overlapping edits are rejected.
+
+For modern profiles, a Capstone coverage audit runs even when the expected role minima are satisfied, including during `apply` and post-write verification. It checks memory comparisons and supported register-loaded manifest comparisons for MV2 flag/type/location control flow. An unclassified extra gate stops patching, including one inside another signature's code window. This is a bounded audit of known instruction/dataflow forms, not a completeness guarantee or authorization to patch arbitrary semantic candidates. New edits still require independent validated control-flow proofs.
+
+The binary signatures, role minima, and legacy exact counts are kept in [mv2profiles.py](./mv2profiles.py). Block association and coverage live in [mv2flow.py](./mv2flow.py); command and file-writing logic remains in `mv2ctl.py`. Add a new build only after confirming every candidate and branch destination.
 
 ## Requirements
 
 - Linux x86-64, Python 3.10 or newer, for binary patching.
 - The Chromium binary and its matching `resources.pak`.
+- Capstone for modern block coverage: `python3 -m pip install -r requirements.txt`. Missing Capstone prevents modern-profile patch authorization.
 - Root privileges only for replacing a system-installed binary. Profile repair should run as the profile owner.
 - Fully close Chromium before `apply`, `restore`, or profile repair.
 - GTK 4 / PyGObject for the desktop interface; `pkexec` is used to request administrator privileges for system-browser patching.
@@ -56,7 +67,7 @@ python3 ./mv2ctl.py test-apply /path/to/chromium
 python3 ./mv2ctl.py test-apply /path/to/chromium --output /tmp/chromium-mv2-test
 ```
 
-The command requires a fully recognized profile, patches a separate copy, and confirms that the normal analyzer reports it as patched. It does not launch Chromium or verify extension behavior; use the printed copy path for an isolated manual browser test. Unknown or partly recognized builds are refused.
+The command requires a fully recognized profile, patches a separate copy, and confirms that the normal analyzer reports it as patched. It does not launch Chromium or verify extension behavior; use the printed copy path for an isolated manual browser test. A fully validated mix of original and patched blocks can be completed on the test copy. Unknown or partly recognized builds are refused.
 
 Inspect the installed binary without changing it:
 
@@ -149,7 +160,7 @@ Default targets and archive names:
 | Builds | Target names | Archive names |
 | --- | --- | --- |
 | Chrome Linux x64, Stable/Beta/Dev/Canary | `chrome-linux-{channel}` | `chrome-{channel}-{version}.tar.zst` |
-| Chrome Windows x64, Stable/Beta/Dev | `chrome-win64-{channel}` | `chrome-win64-{version}-{channel}.tar.zst` |
+| Chrome Windows x64, all four channels | `chrome-win64-{channel}` | `chrome-win64-{version}-{channel}.tar.zst` |
 | Chrome for Testing Linux x64, all four channels | `chrome-testing-linux-{channel}` | `chrome-{channel}-{version}-testing.tar.zst` |
 | Chrome for Testing Windows x64, all four channels | `chrome-testing-win64-{channel}` | `chrome-win64-{version}-{channel}-testing.tar.zst` |
 | Arch Chromium, newest version from extra/extra-testing | `chromium-arch` | Original name, e.g. `chromium-156.0.8078.79-1-x86_64.pkg.tar.zst` |

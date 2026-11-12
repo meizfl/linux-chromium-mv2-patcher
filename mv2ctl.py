@@ -17,7 +17,9 @@ How it works: the compiler inlined IsExtensionAffected() at several locations.
 Each copy first checks "manifest_version > 2 -> unaffected." We make this branch
 always take that path (as in the Windows version: jg -> jmp). Each copy is validated
 against its full byte sequence and checked to ensure ALL "safe exits" lead to one target.
-Any mismatch in the number or structure of sites aborts without writing (fail-closed).
+Legacy counts remain exact; modern profiles allow repeated independently proven
+blocks and require role/copy minima plus a coverage audit. Unclassified gates or
+invalid control flow abort without writing (fail-closed).
 
 Changes are written to a temporary copy, which atomically replaces the original (a running Chromium is left untouched).
 """
@@ -33,9 +35,12 @@ import sys
 import shlex
 import tempfile
 
+from mv2flow import install_blocks, profile_matches, unique_sites, audit_unclassified
+
 from mv2profiles import (
     EXPECT,
     EXPECT_PROFILES,
+    REPEATABLE_PROFILE_ROLES,
     F,
     HDR,
     FLAGCHK,
@@ -237,9 +242,10 @@ def decode_jump(mm, off):
 
 # ------------------------------------------------------------------ site discovery
 class Site:
-    def __init__(self, kind, start, end, jpos, orig, new, state, info):
+    def __init__(self, kind, start, end, jpos, orig, new, state, info, evidence=None):
         self.kind, self.start, self.end = kind, start, end
         self.jpos, self.orig, self.new, self.state, self.info = jpos, orig, new, state, info
+        self.evidence = evidence if evidence is not None else ((start, end),)
 
 
 def make_site(kind, mm, m, jname, orig, new, info):
@@ -284,31 +290,13 @@ def _win_install_policy_valid(mm, seg, start, error_rx):
 def find_sites(mm, segs):
     sites, rejects = [], []
     fmt = "PE" if mm[:2] == b"MZ" else "ELF" if mm[:4] == b"\x7fELF" else "other"
-    for required_fmt, entry_rx, detail_rx, resources in R159_INSTALL:
-        if fmt != required_fmt:
-            continue
-        for seg in segs:
-            for entry in entry_rx.finditer(mm, seg.off, seg.off + seg.filesz):
-                jpos, safe = entry.start("j"), entry.start("safe")
-                details = list(detail_rx.finditer(mm, entry.end(),
-                               min(jpos + 0x400, seg.off + seg.filesz)))
-                if len(details) != 1:
-                    rejects.append(("N5", entry.start(), "UserMayInstall requires one complete MV2 error block"))
-                    continue
-                detail = details[0]
-                resource = struct.unpack_from("<I", mm, detail.start("resource"))[0]
-                exits = [decode_jump(mm, detail.start(name)) for name in ("ja", "jae", "je1", "je2")]
-                cur = bytes(mm[jpos:jpos + 6])
-                original = b"\x0f\x8e" + struct.pack("<i", detail.start() - jpos - 6)
-                if (resource not in resources or
-                        any(exit is None or exit[0] != safe for exit in exits) or
-                        cur not in (original, b"\x90" * 6)):
-                    rejects.append(("N5", entry.start(),
-                                    "UserMayInstall manifest/error/policy destinations did not validate"))
-                    continue
-                state = "original" if cur == original else "patched"
-                sites.append(Site("N5", entry.start(), detail.end(), jpos, original, b"\x90" * 6,
-                                  state, f"UserMayInstall normal policy path -> vaddr 0x{vaddr_of(segs, safe) or 0:X}"))
+    install_proofs, install_rejects = install_blocks(mm, segs, fmt, R159_INSTALL, decode_jump)
+    rejects.extend(install_rejects)
+    for proof in install_proofs:
+        sites.append(Site("N5", proof.entry, proof.end, proof.branch,
+                          proof.original, proof.replacement, proof.state,
+                          f"UserMayInstall normal policy path -> vaddr 0x{vaddr_of(segs, proof.safe) or 0:X}",
+                          evidence=proof.evidence))
     for required_fmt, kind, rx, orig, new, detail, safe, safe_bytes, info in R159_POLICY:
         if fmt != required_fmt:
             continue
@@ -907,7 +895,8 @@ def find_sites(mm, segs):
                         rejects.append(("W6", m.start(), "startup branch misses verified 0x800000 loop"))
                     else:
                         sites.append(Site("W6", m.start(), m.end(), j + 2, disp, b"\0" * 4, "original", f"{family} startup disable branch"))
-    sites.sort(key=lambda x: x.start)
+    sites, conflicts = unique_sites(sites)
+    rejects.extend(conflicts)
     return sites, rejects
 
 
@@ -1129,8 +1118,10 @@ def analyze(path, verbose=True, with_discovery=True):
         kinds = set().union(*(set(profile) for profile in EXPECT_PROFILES.values()))
         counts = {k: sum(1 for s in sites if s.kind == k) for k in kinds}
         profiles = [name for name, expected in EXPECT_PROFILES.items()
-                    if counts == {k: expected.get(k, 0) for k in kinds}]
+                    if profile_matches(counts, expected, REPEATABLE_PROFILE_ROLES.get(name, ()))]
         ok_counts = len(profiles) == 1
+        if ok_counts and profiles[0] in REPEATABLE_PROFILE_ROLES:
+            rejects.extend(audit_unclassified(mm, segs, sites))
         states = {s.state for s in sites if s.state != "ignored"}
         if verbose:
             print(f"binary : {path}")
@@ -1143,7 +1134,10 @@ def analyze(path, verbose=True, with_discovery=True):
                 print(f"  rejected [{kind}] file_off=0x{off:X}: {why}")
             print(f"Counts: {counts}")
             if ok_counts:
-                print(f"Profile: {profiles[0]} -> OK")
+                print(f"Profile: {profiles[0]} -> {'REJECTED' if rejects else 'OK'}")
+                if profiles[0] in REPEATABLE_PROFILE_ROLES:
+                    print("Block coverage: " + ("FAILED" if rejects else
+                          "validated independent branches; role/copy minima satisfied"))
             else:
                 expected = {name: {k: values.get(k, 0) for k in sorted(kinds)}
                             for name, values in EXPECT_PROFILES.items()}
@@ -1272,7 +1266,12 @@ def pending_patch_sites(sites):
             raise SystemExit(
                 f"ABORTED: overlapping patch sites disagree at file offset 0x{site.jpos:X}.")
         pending_by_offset[site.jpos] = site
-    return list(pending_by_offset.values())
+    pending = sorted(pending_by_offset.values(), key=lambda site: site.jpos)
+    for left, right in zip(pending, pending[1:]):
+        if right.jpos < left.jpos + max(len(left.orig), len(left.new)):
+            raise SystemExit("ABORTED: patch instructions overlap at file offset "
+                             f"0x{right.jpos:X}.")
+    return pending
 
 
 def write_patched_copy(source, destination, pending):
@@ -1302,11 +1301,11 @@ def cmd_test_apply(path, output=None):
     """Patch a disposable copy; never write the source binary or its backup."""
     check_size(path)
     sites, status, _ = analyze(path, verbose=True, with_discovery=False)
-    if status not in ("original", "patched"):
+    if status not in ("original", "patched", "mixed"):
         raise SystemExit(
             "\nTEST ABORTED: this build has no fully validated profile. No test copy was made. "
             "Resolve the rejected or missing sites before trial patching.")
-    pending = pending_patch_sites(sites) if status == "original" else []
+    pending = pending_patch_sites(sites) if status != "patched" else []
 
     generated = output is None
     if generated:

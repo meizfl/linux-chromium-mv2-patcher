@@ -33,7 +33,7 @@ import zipfile
 HERE = Path(__file__).resolve().parent
 CHANNELS = ('stable', 'beta', 'dev', 'canary')
 TARGETS = (tuple(f'chrome-linux-{c}' for c in CHANNELS)
-           + tuple(f'chrome-win64-{c}' for c in CHANNELS[:3])
+           + tuple(f'chrome-win64-{c}' for c in CHANNELS)
            + tuple(f'chrome-testing-{p}-{c}' for p in ('linux', 'win64') for c in CHANNELS)
            + ('chromium-arch', 'chromium-snapshot-linux'))
 DEFAULT_TARGETS = TARGETS
@@ -44,7 +44,8 @@ SNAPSHOTS = 'https://storage.googleapis.com/chromium-browser-snapshots/Linux_x64
 APPIDS = dict(zip(CHANNELS, (
     '8A69D345-D564-463C-AFF1-A69D9E530F96',
     '8237E44A-0054-442C-B6B6-EA0509993955',
-    '401C381F-E0DE-4B85-8BD8-3F3F14FBDA57')))
+    '401C381F-E0DE-4B85-8BD8-3F3F14FBDA57',
+    '4EA16AC7-FD5A-47C3-875B-DBF4A2008C20')))
 
 
 class BuildError(Exception):
@@ -410,7 +411,7 @@ def pack(root, destination, arch=False):
 
 def builder_fingerprint():
     digest = hashlib.sha256()
-    for name in ('mv2build.py', 'mv2ctl.py', 'mv2profiles.py', 'mv2universal.py', 'mv2glibc.py'):
+    for name in ('mv2build.py', 'mv2ctl.py', 'mv2profiles.py', 'mv2flow.py', 'mv2universal.py', 'mv2glibc.py'):
         digest.update((HERE / name).read_bytes())
     return digest.hexdigest()
 
