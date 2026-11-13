@@ -44,6 +44,8 @@ Windows Canary 160.0.8158.2 also supports an alternate compiler layout with elev
 
 Windows Canary 160.0.8159.0 uses nine edits. Decoded proofs recognize register changes in impact predicates, tree-iteration/collection edges, and the Windows inlined reason-removal ABI. Both checker copies stay mandatory. See [the decoded-proof report](./docs/windows-160.0.8159.0-decoded.md).
 
+Linux and Windows 160.0.8159.0 now share ABI-aware collection discovery. A changed loop body no longer requires a whole-function signature when its complete policy, iterator and state-preservation proof still holds. See [patch migration](./docs/patch-migration.md) for partial-patch upgrades, backup handling and concise missing-role diagnostics.
+
 ### Independent blocks and coverage
 
 The unit of patching is an individual branch, not a function entry. Multiple MV2 gates inside one function are collected independently. Install gates are linked to their outlined error blocks by their actual branch targets and shared safe policy exits; the search does not require one error block in a fixed forward window. Patched gates are recognized only when their original association can be reconstructed uniquely. Orphan error blocks, ambiguous associations, conflicting proofs, and overlapping edits are rejected.

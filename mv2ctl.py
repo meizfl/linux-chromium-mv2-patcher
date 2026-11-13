@@ -37,7 +37,7 @@ import tempfile
 
 from mv2flow import (install_blocks, profile_matches, unique_sites, audit_unclassified,
                      locale_pack_for, manifest_resource_ids, reenable_blocks, unclassified_install_messages, inline_windows_install, shared_policy_entries,
-                     pure_impact_blocks, startup_collection_blocks)
+                     pure_impact_blocks, startup_collection_blocks, profile_gaps)
 
 from mv2profiles import (
     R160_INLINE_WIN_ERROR,
@@ -901,12 +901,12 @@ def find_sites(mm, segs, resource_ids=None):
                         rejects.append(("W6", m.start(), "startup branch misses verified 0x800000 loop"))
                     else:
                         sites.append(Site("W6", m.start(), m.end(), j + 2, disp, b"\0" * 4, "original", f"{family} startup disable branch"))
-    if fmt == "PE":
+    if fmt in ("ELF", "PE"):
         for kind, finder, label in (
                 ("N1", pure_impact_blocks, "decoded impact predicate: unaffected return"),
                 ("N6", startup_collection_blocks, "decoded startup collection: verified next-item path")):
             known = {site.jpos for site in sites}
-            proofs = finder(mm, segs, known, decode_jump) if kind == "N6" else finder(mm, segs, known)
+            proofs = finder(mm, segs, known, decode_jump, fmt) if kind == "N6" else finder(mm, segs, known)
             for proof in proofs:
                 sites.append(Site(kind, proof.entry, proof.end, proof.branch,
                                   proof.original, proof.replacement, proof.state, label,
@@ -1176,7 +1176,9 @@ def analyze(path, verbose=True, with_discovery=True, resource_path=None):
         profiles = [name for name, expected in EXPECT_PROFILES.items()
                     if profile_matches(counts, expected, REPEATABLE_PROFILE_ROLES.get(name, ()))]
         ok_counts = len(profiles) == 1
-        if ok_counts and profiles[0] in REPEATABLE_PROFILE_ROLES:
+        modern_evidence = len({'N1', 'N2', 'N3', 'N4', 'N5', 'N6'} &
+                              {site.kind for site in sites}) >= 3
+        if modern_evidence or (ok_counts and profiles[0] in REPEATABLE_PROFILE_ROLES):
             rejects.extend(audit_unclassified(mm, segs, sites))
         states = {s.state for s in sites if s.state != "ignored"}
         if verbose:
@@ -1191,16 +1193,36 @@ def analyze(path, verbose=True, with_discovery=True, resource_path=None):
                       f"state={s.state:<9} {s.info}")
             for kind, off, why in rejects:
                 print(f"  rejected [{kind}] file_off=0x{off:X}: {why}")
-            print(f"Counts: {counts}")
+            print(f"Counts: { {kind: value for kind, value in sorted(counts.items()) if value} }")
             if ok_counts:
                 print(f"Profile: {profiles[0]} -> {'REJECTED' if rejects else 'OK'}")
                 if profiles[0] in REPEATABLE_PROFILE_ROLES:
                     print("Block coverage: " + ("FAILED" if rejects else
                           "validated independent branches; role/copy minima satisfied"))
             else:
-                expected = {name: {k: values.get(k, 0) for k in sorted(kinds)}
-                            for name, values in EXPECT_PROFILES.items()}
-                print(f"Profile not recognized; expected site counts: {expected}")
+                ranked = []
+                for name, expected in EXPECT_PROFILES.items():
+                    missing, extra = profile_gaps(counts, expected, REPEATABLE_PROFILE_ROLES.get(name, ()))
+                    distance = sum(required - actual for actual, required in missing.values()) + sum(
+                        actual - required for actual, required in extra.values())
+                    ranked.append((distance, name, missing, extra))
+                ranked.sort(key=lambda row: (row[0], row[1]))
+                print("Profile not recognized; closest validated families (diagnostic only):")
+                for distance, name, missing, extra in ranked[:3]:
+                    if distance > ranked[0][0]:
+                        break
+                    print(f"  {name}")
+                    if missing:
+                        print("    Missing roles: " + ', '.join(
+                            f"{kind} {actual}/{required}" for kind, (actual, required) in sorted(missing.items())))
+                    if extra:
+                        print("    Unexpected roles/copies: " + ', '.join(
+                            f"{kind} {actual}/{required}" for kind, (actual, required) in sorted(extra.items())))
+                print("Migration refused: missing or unproved blocks must be resolved before writing.")
+            if ok_counts and not rejects and "unknown" not in states:
+                pending = len(pending_patch_sites(sites))
+                done = len({site.jpos for site in sites if site.state == "patched"})
+                print(f"Validated migration plan: {pending} pending edits; {done} already patched instructions.")
             if with_discovery and (not ok_counts or rejects or "unknown" in states):
                 print()
                 discover(mm, segs, sites)

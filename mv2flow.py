@@ -214,6 +214,18 @@ def profile_matches(counts, expected, repeatable=()):
                for kind, actual in counts.items())
 
 
+def profile_gaps(counts, expected, repeatable=()):
+    """Explain family migration without turning similarity into authorization."""
+    missing, extra = {}, {}
+    for kind in counts.keys() | expected.keys():
+        actual, required = counts.get(kind, 0), expected.get(kind, 0)
+        if actual < required:
+            missing[kind] = (actual, required)
+        elif actual > required and (not required or kind not in repeatable):
+            extra[kind] = (actual, required)
+    return missing, extra
+
+
 def unique_sites(sites):
     """Deduplicate each role proof; allow identical edits shared by legacy roles."""
     found, roles, rejects = {}, {}, []
@@ -650,7 +662,7 @@ def pure_impact_blocks(mm, segs, known_branches):
     return proofs
 
 
-def startup_collection_blocks(mm, segs, known_branches, decode_jump):
+def startup_collection_blocks(mm, segs, known_branches, decode_jump, fmt="PE"):
     """Prove a collection gate from policy edges and both iterator advances.
 
     The body between iteration and policy may grow or move. Require the four
@@ -736,8 +748,9 @@ def startup_collection_blocks(mm, segs, known_branches, decode_jump):
             for position in starts:
                 if not seg.off <= position < end:
                     continue
-                block = decode(position, end, 23)
-                if len(block) != 23:
+                instruction_count = 19 if fmt == "ELF" else 23
+                block = decode(position, end, instruction_count)
+                if len(block) != instruction_count:
                     continue
                 a,b,c,d,e,f,g,h,i,j,k,l,m,*tail = block
                 try:
@@ -757,16 +770,36 @@ def startup_collection_blocks(mm, segs, known_branches, decode_jump):
                         j.mnemonic == l.mnemonic == 'cmp' and reg(j.operands[0]) == reg(l.operands[0]) == typ and
                         j.operands[1].type == l.operands[1].type == x86.X86_OP_IMM and {j.operands[1].imm,l.operands[1].imm} == {5,10} and
                         k.mnemonic == m.mnemonic == 'je' and target(k) == target(m) == safe)
-                    t0,t1,t2,t3,t4,t5,t6,t7,t8,t9 = tail
-                    saved_iter, saved_end = reg(t1.operands[0]), reg(t4.operands[0])
-                    valid = (valid and t0.mnemonic == 'lea' and reg(t0.operands[0]) == x86.X86_REG_R8 and
-                        mem(t0.operands[1], iterator, 0x38) and mov(t1, saved_iter, iterator) and
-                        t2.mnemonic == t3.mnemonic == 'mov' and reg(t2.operands[0]) == x86.X86_REG_RCX and
-                        reg(t3.operands[0]) == x86.X86_REG_RDX and reg(t2.operands[1]) and reg(t3.operands[1]) and
-                        mov(t4, saved_end, endreg) and t5.mnemonic == 'call' and target(t5) is not None and
-                        any(s.off <= target(t5) < s.off + s.filesz for s in segs) and
-                        t6.mnemonic == 'mov' and reg(t6.operands[0]) == mask and imm(t6.operands[1], 0x10a) and
-                        mov(t7, iterator, saved_iter) and mov(t8, endreg, saved_end) and t9.mnemonic == 'jmp' and target(t9) == safe)
+                    exit_ins = tail[-1]
+                    if fmt == "ELF":
+                        t0,t1,t2,t3,t4,t5 = tail
+                        saved = t2.operands[0]
+                        restored = t4.operands[1]
+                        preserved = {'rbx', 'rbp', 'r12', 'r13', 'r14', 'r15'}
+                        valid = (valid and _register_root(decoder, iterator) in preserved and
+                            _register_root(decoder, mask) in preserved and
+                            t0.mnemonic == t1.mnemonic == 'lea' and
+                            reg(t0.operands[0]) == x86.X86_REG_RSI and mem(t0.operands[1], iterator, 0x38) and
+                            reg(t1.operands[0]) == x86.X86_REG_RDI and t1.operands[1].type == x86.X86_OP_MEM and
+                            t1.operands[1].mem.base in (x86.X86_REG_RBP, x86.X86_REG_RSP) and not t1.operands[1].mem.index and
+                            t2.mnemonic == 'mov' and saved.type == x86.X86_OP_MEM and saved.size == 8 and
+                            saved.mem.base in (x86.X86_REG_RBP, x86.X86_REG_RSP) and not saved.mem.index and
+                            reg(t2.operands[1]) == endreg and t3.mnemonic == 'call' and target(t3) is not None and
+                            any(s.off <= target(t3) < s.off + s.filesz for s in segs) and
+                            t4.mnemonic == 'mov' and reg(t4.operands[0]) == endreg and
+                            mem(restored, saved.mem.base, saved.mem.disp) and restored.size == 8 and
+                            t5.mnemonic == 'jmp' and target(t5) == safe)
+                    else:
+                        t0,t1,t2,t3,t4,t5,t6,t7,t8,t9 = tail
+                        saved_iter, saved_end = reg(t1.operands[0]), reg(t4.operands[0])
+                        valid = (valid and t0.mnemonic == 'lea' and reg(t0.operands[0]) == x86.X86_REG_R8 and
+                            mem(t0.operands[1], iterator, 0x38) and mov(t1, saved_iter, iterator) and
+                            t2.mnemonic == t3.mnemonic == 'mov' and reg(t2.operands[0]) == x86.X86_REG_RCX and
+                            reg(t3.operands[0]) == x86.X86_REG_RDX and reg(t2.operands[1]) and reg(t3.operands[1]) and
+                            mov(t4, saved_end, endreg) and t5.mnemonic == 'call' and target(t5) is not None and
+                            any(s.off <= target(t5) < s.off + s.filesz for s in segs) and
+                            t6.mnemonic == 'mov' and reg(t6.operands[0]) == mask and imm(t6.operands[1], 0x10a) and
+                            mov(t7, iterator, saved_iter) and mov(t8, endreg, saved_end) and t9.mnemonic == 'jmp' and target(t9) == safe)
                 except IndexError:
                     valid = False
                 if not valid:
@@ -776,7 +809,7 @@ def startup_collection_blocks(mm, segs, known_branches, decode_jump):
                 reason = mm.find(b'\xc7\x00\x00\x00\x80\x00', loop[-1].address + loop[-1].size, position)
                 if reason < 0:
                     continue
-                finish = t9.address + t9.size
+                finish = exit_ins.address + exit_ins.size
                 details.append((position, finish, reason))
             if len(details) != 1:
                 continue
