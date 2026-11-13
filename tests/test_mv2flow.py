@@ -82,10 +82,10 @@ class MultipleBlockTests(unittest.TestCase):
             meta, data = self.case(fmt)
             checker = next(w for w in meta['windows'] if w['kind'] == 'N1')
             code = bytearray.fromhex(checker['hex'])
-            # Equivalent XOR encoding: still an obvious MV2 block, but no
-            # validated instruction signature authorizes this variant.
+            # An unproved SUB implementation still has MV2 landmarks, but
+            # neither a signature nor the decoded XOR proof authorizes it.
             self.assertEqual(code[6:8], b'\x31\xc0')
-            code[6] = 0x33
+            code[6] = 0x29
             data[0x1540:0x1540 + len(code)] = code
             with self.subTest(fmt=fmt), tempfile.TemporaryDirectory() as directory:
                 segments = ctl.parse_exec_segments(data)

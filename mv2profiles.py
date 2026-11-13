@@ -23,6 +23,9 @@ EXPECT_PROFILES = {
     "Chrome / Chrome for Testing 159–160 Windows x86-64 (complete MV2 policy)": {
         "N1": 2, "N2": 1, "N3": 1, "N4": 1, "N5": 1, "N6": 1, "V": 1,
     },
+    "Chrome 160 Windows x86-64 (alternate inline policy)": {
+        "A": 4, "C": 1, "N1": 3, "N2": 1, "N3": 1, "N5": 1, "N6": 1,
+    },
     "Chromium 154-compatible ELF layout": EXPECT,
     "Chromium distro ELF layout (alternate MustRemainDisabled call encoding)": {
         "A": 4, "B": 1, "C": 1, "D": 0, "H": 1, "M": 1, "S": 0, "U": 1,
@@ -112,6 +115,9 @@ REPEATABLE_PROFILE_ROLES = {
     for name, expected in EXPECT_PROFILES.items()
     if {'N1', 'N2', 'N3', 'N4', 'N5', 'N6'} <= expected.keys()
 }
+
+REPEATABLE_PROFILE_ROLES["Chrome 160 Windows x86-64 (alternate inline policy)"] = frozenset(
+    ('A', 'C', 'N1', 'N2', 'N3', 'N5', 'N6'))
 
 # ------------------------------------------------------------------ regex patterns
 F = re.DOTALL
@@ -530,7 +536,8 @@ R159_POLICY = [
 # UserMayInstall's version gate precedes the outlined detail block by hundreds
 # of bytes. Match the entry and detail separately, then validate every policy
 # exclusion's return to the normal UserMayLoad/callback path in mv2ctl.py.
-# The resource IDs were checked against each official build's en-US.pak.
+# Numeric IDs below are a standalone-binary fallback only. Full distributions
+# resolve the message identity from en-US.pak in mv2flow.py; never add ID ranges.
 R159_INSTALL = [
     ('ELF', re.compile(
         rb'(?:\x49\x8b\x7f\x08\xe8....|'
@@ -803,3 +810,104 @@ R159_POLICY.extend([
         ), bytes.fromhex('0f8e09050000'), bytes.fromhex('909090909090'), 1309, 20,
         bytes.fromhex('498b4d08'), 'DisableAffectedExtensions next-item path'),
 ])
+
+# Windows 160 alternate compiler layout: MV2 decisions remain inlined.
+# Keep all policy/control-flow bytes; mask only linker-dependent operands.
+R160_INLINE_WIN_POLICY = [
+    ('PE', 'N6', _policy_pattern(
+        '83 79 50 02',
+        '0f8ffe000000', '90e9fe000000',
+        '48 8B 91 28 02 00 00 8B 42 50 80 B9 08 02 00 00 00 75 1D 8B 8A 88 00 00 '
+        '00 83 F9 08 0F 87 DC 00 00 00 BA 0A 01 00 00 0F A3 CA 0F 83 CE 00 00 00 '
+        '83 F8 05 0F 84 C5 00 00 00 83 F8 0A 0F 84 BC 00 00 00 48 8B 4C 24 70 4C '
+        '8D 64 24 70 4D 89 E5 48 85 C9 74 34 49 8B 47 38 EB 10 0F 1F 40 00 49 8B '
+        '0C 24 4D 89 E5 48 85 C9 74 1E 49 89 CC 48 3B 41 20 72 EB 0F 84 85 00 00 '
+        '00 49 8B 4C 24 08 48 85 C9 75 E7 4D 8D 6C 24 08 B9 28 00 00 00 48 BA C5 '
+        'E5 52 64 8A F4 05 99 E8 ?? ?? ?? ?? 48 85 C0 0F 84 ?? ?? ?? ?? 49 89 C6 '
+        '48 C7 00 00 00 00 00 48 83 C0 20 0F 84 ?? ?? ?? ?? 49 8B 4F 38 48 89 08 '
+        '48 85 C9 74 05 E8 ?? ?? ?? ?? 41 0F 11 36 4D 89 66 10 4D 89 75 00 48 8B '
+        '44 24 68 48 8B 00 48 85 C0 74 09 48 89 44 24 68 4D 8B 75 00 48 8B 4C 24 '
+        '70 4C 89 F2 E8 ?? ?? ?? ?? 48 FF 44 24 78 49 8B 47 08 48 85 C0 74 17 0F '
+        '1F 80 00 00 00 00 49 89 C7 48 8B 00 48 85 C0 75 F5 E9 ?? ?? ?? ?? 4C 89 '
+        'F8 4D 8B 7F 10 49 3B 07 75 F4 E9 ?? ?? ?? ?? 48 8B 77 18 8B 05 ?? ?? ?? '
+        '?? 8B 0D ?? ?? ?? ?? 65 48 8B 14 25 58 00 00 00 48 8B 0C CA 3B 81 04 00 '
+        '00 00 0F 8F ?? ?? ?? ?? 48 8D 0D ?? ?? ?? ?? 48 89 F2 41 B0 01 E8 ?? ?? '
+        '?? ?? 48 89 C3 48 8B 6C 24 68 48 8D 44 24 70 48 39 C5 0F 84 ?? ?? ?? ?? '
+        '49 BE C5 E5 52 64 EE BD 04 05 4C 8D 7C 24 28 4C 8D 6C 24 48 4C 8D 64 24 '
+        '40 EB 11 0F 1F 00 48 8D 44 24 70 48 39 C5 0F 84 ?? ?? ?? ?? B9 04 00 00 '
+        '00 4C 89 F2 E8 ?? ?? ?? ?? 48 89 44 24 28 48 C7 44 24 38 01 00 00 00 C7 '
+        '00 00 00 80 00 48 C7 44 24 30 01 00 00 00 4C 8D 40 04 4C 89 F9 48 89 C2 '
+        'E8 ?? ?? ?? ?? 48 8B 45 20 48 85 C0 0F 85 B8 00 00 00 4C 89 E9 48 8D 15 '
+        '?? ?? ?? ?? 41 B8 24 01 00 00 E8 ?? ?? ?? ?? B9 50 01 00 00 48 BA 4E F4 '
+        'EF 9A 4A A4 FC 92 E8 ?? ?? ?? ?? 48 89 C6 44 8B 0D ?? ?? ?? ?? 44 8B 44 '
+        '24 58 48 8B 54 24 50 48 89 C1 E8 ?? ?? ?? ?? 48 8D 05 ?? ?? ?? ?? 48 89 '
+        '06 0F 10 44 24 48 0F 10 4C 24 58 0F 11 86 30 01 00 00 0F 11 8E 40 01 00 '
+        '00 48 8D 4E 10 41 B8 0F 00 00 00 48 8D 15 ?? ?? ?? ?? E8 ?? ?? ?? ?? 41 '
+        'B8 04 00 00 00 48 89 C1 48 8D 15 ?? ?? ?? ?? E8 ?? ?? ?? ?? 41 B8 02 00 '
+        '00 00 48 89 C1 48 8D 15 ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 89 74 24 40 4C 89 '
+        'E1 E8 ?? ?? ?? ?? 48 8B 45 20 48 8B B0 28 02 00 00 4C 89 E9 4C 89 FA E8 '
+        '?? ?? ?? ?? 48 89 D9 49 89 F0 4D 89 E9 E8 ?? ?? ?? ?? '
+        ), bytes.fromhex('0f8ffe000000'), bytes.fromhex('90e9fe000000'), 264, 264,
+        bytes.fromhex('498b47'), 'startup collection next-item path'),
+    ('PE', 'N3', _policy_pattern(
+        '83 7A 50 02',
+        '0f85c6010000', '90e9c6010000',
+        '80 BA 08 02 00 00 00 0F 85 B9 01 00 00 48 8B 09 48 8B 82 28 02 00 00 44 '
+        '8B 88 88 00 00 00 41 83 F9 08 74 0A 41 83 F9 01 0F 85 98 01 00 00 44 8B '
+        '48 50 31 F6 41 83 F9 05 74 42 41 83 F9 0A 74 3C 48 89 D6 44 89 C3 E8 ?? '
+        '?? ?? ?? 48 89 F7 48 8B 96 28 02 00 00 48 89 C1 41 B8 00 00 80 00 E8 ?? '
+        '?? ?? ?? 84 DB 74 08 84 C0 0F 85 ?? ?? ?? ?? 0F B6 F0 83 C6 03 48 8B 87 '
+        '28 02 00 00 8B 40 50 48 83 F8 0A 0F 87 ?? ?? ?? ?? 48 8D 0D ?? ?? ?? ?? '
+        '48 63 04 81 48 01 C8 FF E0 48 8D 05 ?? ?? ?? ?? EB 22 48 8D 05 ?? ?? ?? '
+        '?? EB 19 48 8D 05 ?? ?? ?? ?? EB 10 48 8D 05 ?? ?? ?? ?? EB 07 48 8D 05 '
+        '?? ?? ?? ?? 48 89 84 24 88 00 00 00 48 8D 05 ?? ?? ?? ?? 48 89 84 24 90 '
+        '00 00 00 0F 57 C0 0F 29 44 24 30 48 C7 44 24 40 00 00 00 00 48 8D 84 24 '
+        '88 00 00 00 48 89 44 24 78 48 C7 84 24 80 00 00 00 01 00 00 00 48 8D 05 '
+        '?? ?? ?? ?? 48 89 44 24 68 48 C7 44 24 70 2E 00 00 00 48 8D 7C 24 30 48 '
+        '89 7C 24 58 48 8D 05 ?? ?? ?? ?? 48 89 44 24 60 48 8D 4C 24 58 48 8D 54 '
+        '24 68 4C 8D 44 24 78 E8 ?? ?? ?? ?? 84 C0 0F 84 ?? ?? ?? ?? 48 0F BE 44 '
+        '24 47 48 85 C0 48 0F 48 44 24 38 48 0F 48 7C 24 30 48 89 7C 24 78 48 89 '
+        '84 24 80 00 00 00 C7 44 24 20 01 00 00 00 48 8D 4C 24 78 41 B9 06 00 00 '
+        '00 BA 01 00 00 00 41 B8 05 00 00 00 E8 ?? ?? ?? ?? 48 8B 08 4C 8B 41 28 '
+        '48 89 C1 89 F2 4C 89 C0 FF 15 ?? ?? ?? ?? 80 7C 24 47 00 79 19 48 BA FF '
+        'FF FF FF FF FF FF 7F 48 23 54 24 40 48 8B 4C 24 30 E8 ?? ?? ?? ?? 48 8B '
+        '84 24 98 00 00 00 48 31 E0 48 8B 0D ?? ?? ?? ?? 48 39 C1 75 37 48 81 C4 '
+        'A0 00 00 00 5B 5F 5E C3 '
+        ), bytes.fromhex('0f85c6010000'), bytes.fromhex('90e9c6010000'), 464, 464,
+        bytes.fromhex('488b84'), 'startup helper return preserving epilogue'),
+    ('PE', 'C', _policy_pattern(
+        '41 83 7F 50 02',
+        '7e04', '9090',
+        '31 C0 EB 3B 49 8B 87 28 02 00 00 8B 48 50 41 80 BF 08 02 00 00 00 75 19 '
+        '8B 90 88 00 00 00 31 C0 83 FA 08 77 1A 41 B8 0A 01 00 00 41 0F A3 D0 73 '
+        '0E 83 F9 05 0F 95 C2 83 F9 0A 0F 95 C0 20 D0 41 88 85 93 03 00 00 '
+        ), bytes.fromhex('7e04'), bytes.fromhex('9090'), 11, 7,
+        bytes.fromhex('31c0eb'), 'extension status unaffected boolean'),
+    ('PE', 'N2', _policy_pattern(
+        '48 85 F6 74 02 89 06 40 B7 01 80 7C 24 37 00 79 19 48 BA FF FF FF FF FF '
+        'FF FF 7F 48 23 54 24 30 48 8B 4C 24 20 E8 ?? ?? ?? ?? 48 8B 44 24 50 48 '
+        '31 E0 48 8B 0D ?? ?? ?? ?? 48 39 C1 0F 85 ?? ?? ?? ?? 89 F8 48 83 C4 58 '
+        '5B 5F 5E 41 5E C3 48 8B 5B 08 8B 05 ?? ?? ?? ?? 8B 0D ?? ?? ?? ?? 65 48 '
+        '8B 14 25 58 00 00 00 48 8B 0C CA 3B 81 04 00 00 00 0F 8F ?? ?? ?? ?? 48 '
+        '8D 0D ?? ?? ?? ?? 48 89 DA 41 B0 01 E8 ?? ?? ?? ?? 48 85 C0 74 06 83 7F '
+        '50 02',
+        '7e07', '9090',
+        '31 FF E9 6F FF FF FF 48 8B 8F 28 02 00 00 8B 41 50 80 BF 08 02 00 00 00 '
+        '75 1F 8B 89 88 00 00 00 31 FF 83 F9 08 0F 87 4B FF FF FF BA 0A 01 00 00 '
+        '0F A3 CA 0F 83 3D FF FF FF 31 FF 83 F8 05 0F 84 32 FF FF FF 83 F8 0A 0F '
+        '84 29 FF FF FF B8 00 00 80 00 E9 15 FF FF FF '
+        ), bytes.fromhex('7e07'), bytes.fromhex('9090'), 155, 148,
+        bytes.fromhex('31ffe9'), 'MustRemainDisabled false-result path'),
+]
+R159_POLICY.extend(R160_INLINE_WIN_POLICY)
+
+# Affected install branch in the alternate compiler family. Its resource is
+# resolved by message identity from the matching locale pack, never its number.
+R160_INLINE_WIN_ERROR = re.compile(
+    _byte_pattern('48 8B 0D ?? ?? ?? ?? 48 85 C9 0F 84 ?? ?? ?? ?? '
+                  '0F 28 05 ?? ?? ?? ?? 0F 29 84 24 D0 00 00 00 '
+                  '48 B8 AA AA AA AA AA AA AA AA 48 89 84 24 E0 00 00 00 '
+                  '48 8D 94 24 D0 00 00 00 41 B8').pattern +
+    rb'(?P<resource>....)(?P<call>\xe8....)' +
+    _byte_pattern('48 8B 84 24 E0 00 00 00 48 89 84 24 30 02 00 00 '
+                  '0F 28 84 24 D0 00 00 00 0F 29 84 24 20 02 00 00').pattern, F)

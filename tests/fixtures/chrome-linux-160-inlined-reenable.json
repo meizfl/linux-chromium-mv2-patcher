@@ -1,0 +1,7 @@
+{
+  "source": "chrome-testing-linux-canary-160.0.8155.0",
+  "entry_offset": "0x70d390a",
+  "detail_offset": "0x70d4158",
+  "entry_hex": "837950020f8e44080000c785e0fdffff000080004c89ff4c89ee4c89eae874b61903",
+  "detail_hex": "488b91280200008b425080b90802000000751d8b8a8800000083f9080f879af7ffffba0a0100000fa3ca0f838cf7ffff83f80a0f8483f7ffff83f8050f847af7ffffe98df7ffff"
+}

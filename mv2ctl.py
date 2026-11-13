@@ -35,9 +35,12 @@ import sys
 import shlex
 import tempfile
 
-from mv2flow import install_blocks, profile_matches, unique_sites, audit_unclassified
+from mv2flow import (install_blocks, profile_matches, unique_sites, audit_unclassified,
+                     locale_pack_for, manifest_resource_ids, reenable_blocks, unclassified_install_messages, inline_windows_install, shared_policy_entries,
+                     pure_impact_blocks, startup_collection_blocks)
 
 from mv2profiles import (
+    R160_INLINE_WIN_ERROR,
     EXPECT,
     EXPECT_PROFILES,
     REPEATABLE_PROFILE_ROLES,
@@ -231,6 +234,9 @@ def decode_jump(mm, off):
         rel = mm[off + 1]
         rel -= 256 if rel > 127 else 0
         return off + 2 + rel, 2
+    if b0 == 0xe9:
+        rel = struct.unpack_from("<i", mm, off + 1)[0]
+        return off + 5 + rel, 5
     if b0 == 0x0f and 0x80 <= mm[off + 1] <= 0x8f:
         rel = struct.unpack_from("<i", mm, off + 2)[0]
         return off + 6 + rel, 6
@@ -287,10 +293,10 @@ def _win_install_policy_valid(mm, seg, start, error_rx):
             bytes(mm[shared:shared + 5]) == b"\x41\x80\x7e\x17\x00")
 
 
-def find_sites(mm, segs):
+def find_sites(mm, segs, resource_ids=None):
     sites, rejects = [], []
     fmt = "PE" if mm[:2] == b"MZ" else "ELF" if mm[:4] == b"\x7fELF" else "other"
-    install_proofs, install_rejects = install_blocks(mm, segs, fmt, R159_INSTALL, decode_jump)
+    install_proofs, install_rejects = install_blocks(mm, segs, fmt, R159_INSTALL, decode_jump, resource_ids)
     rejects.extend(install_rejects)
     for proof in install_proofs:
         sites.append(Site("N5", proof.entry, proof.end, proof.branch,
@@ -895,6 +901,47 @@ def find_sites(mm, segs):
                         rejects.append(("W6", m.start(), "startup branch misses verified 0x800000 loop"))
                     else:
                         sites.append(Site("W6", m.start(), m.end(), j + 2, disp, b"\0" * 4, "original", f"{family} startup disable branch"))
+    if fmt == "PE":
+        for kind, finder, label in (
+                ("N1", pure_impact_blocks, "decoded impact predicate: unaffected return"),
+                ("N6", startup_collection_blocks, "decoded startup collection: verified next-item path")):
+            known = {site.jpos for site in sites}
+            proofs = finder(mm, segs, known, decode_jump) if kind == "N6" else finder(mm, segs, known)
+            for proof in proofs:
+                sites.append(Site(kind, proof.entry, proof.end, proof.branch,
+                                  proof.original, proof.replacement, proof.state, label,
+                                  evidence=proof.evidence))
+    inline_messages = set()
+    inline_family = fmt == "PE" and {'A', 'N2', 'N3', 'N6'} <= {site.kind for site in sites}
+    if inline_family:
+        proofs, inline_messages, inline_rejects = inline_windows_install(
+            mm, segs, sites, R160_INLINE_WIN_ERROR, resource_ids, decode_jump)
+        rejects.extend(inline_rejects)
+        for proof in proofs:
+            sites.append(Site("N5", proof.entry, proof.end, proof.branch,
+                              proof.original, proof.replacement, proof.state,
+                              "inline UserMayInstall unaffected path; localized manifest error verified",
+                              evidence=proof.evidence))
+    if inline_family:
+        for proof in shared_policy_entries(mm, segs, sites, decode_jump):
+            sites.append(Site("N1", proof.entry, proof.end, proof.branch,
+                              proof.original, proof.replacement, proof.state,
+                              "independent entry to shared, validated MV2 policy block",
+                              evidence=proof.evidence))
+    if resource_ids is not None and (inline_family or any(site.kind == "N1" for site in sites)):
+        bound_messages = set(inline_messages)
+        for proof in install_proofs:
+            for required_fmt, _, detail_rx, _ in R159_INSTALL:
+                detail = detail_rx.match(mm, proof.detail) if required_fmt == fmt else None
+                if detail is not None:
+                    bound_messages.add(detail.start('resource') - 1)
+        rejects.extend(unclassified_install_messages(mm, segs, resource_ids, bound_messages))
+    if fmt in ("ELF", "PE") and any(site.kind == "N1" for site in sites):
+        for proof in reenable_blocks(mm, segs, {site.jpos for site in sites}, fmt):
+            sites.append(Site("N4", proof.entry, proof.end, proof.branch,
+                              proof.original, proof.replacement, proof.state,
+                              "inlined re-enable gate: remove MV2 reason through verified insertion path",
+                              evidence=proof.evidence))
     sites, conflicts = unique_sites(sites)
     rejects.extend(conflicts)
     return sites, rejects
@@ -1111,10 +1158,19 @@ def discover(mm, segs, sites):
     print(f"[bt sites with nearby cmp 8 outside known patterns: {shown}]\n")
 
 
-def analyze(path, verbose=True, with_discovery=True):
+def analyze(path, verbose=True, with_discovery=True, resource_path=None):
+    resource_path = resource_path if resource_path is not None else locale_pack_for(path)
+    resource_ids, resource_error = None, None
+    if resource_path is not None:
+        try:
+            resource_ids = manifest_resource_ids(resource_path)
+        except (OSError, ValueError, struct.error) as exc:
+            resource_ids, resource_error = frozenset(), str(exc)
     with open(path, "rb") as f, mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
         segs = parse_exec_segments(mm)
-        sites, rejects = find_sites(mm, segs)
+        sites, rejects = find_sites(mm, segs, resource_ids)
+        if resource_error and any(s.kind.startswith('N') for s in sites):
+            rejects.append(('resources', 0, resource_error))
         kinds = set().union(*(set(profile) for profile in EXPECT_PROFILES.values()))
         counts = {k: sum(1 for s in sites if s.kind == k) for k in kinds}
         profiles = [name for name, expected in EXPECT_PROFILES.items()
@@ -1126,6 +1182,9 @@ def analyze(path, verbose=True, with_discovery=True):
         if verbose:
             print(f"binary : {path}")
             print(f"size   : {os.path.getsize(path)}")
+            if resource_path is not None:
+                print(f"Install error resources: {resource_path} -> "
+                      + (', '.join(f'0x{rid:X}' for rid in sorted(resource_ids)) or 'unresolved'))
             print("Detected sites:")
             for s in sites:
                 print(f"  [{s.kind}] file_off=0x{s.jpos:X} vaddr=0x{vaddr_of(segs, s.jpos) or 0:X} "
@@ -1288,7 +1347,8 @@ def write_patched_copy(source, destination, pending):
                 f.write(site.new)
             f.flush()
             os.fsync(f.fileno())
-        _, status, _ = analyze(destination, verbose=False, with_discovery=False)
+        _, status, _ = analyze(destination, verbose=False, with_discovery=False,
+                               resource_path=locale_pack_for(source))
         if status != "patched":
             raise SystemExit(f"Test patch self-check failed (status={status}); copy discarded.")
     except BaseException:
