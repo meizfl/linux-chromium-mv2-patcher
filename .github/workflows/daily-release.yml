@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  issues: write
 
 concurrency:
   group: daily-mv2-release
@@ -116,8 +117,15 @@ jobs:
           gh release upload "$TAG" ./*.tar.zst ./*.tar.zst.json SHA256SUMS build.log --clobber
           gh release edit "$TAG" --title "$TAG" --notes-file "$RUNNER_TEMP/release-notes.md" --draft=false --latest
 
+      - name: Create or update failure issues
+        if: ${{ !cancelled() && (failure() || steps.build.outcome == 'failure') }}
+        env:
+          RELEASE_TAG: ${{ steps.date.outputs.tag }}
+          WORKFLOW_FAILED: ${{ failure() }}
+        run: python .github/scripts/report-build-failures.py
+
       - name: Report failed targets
-        if: steps.build.outcome == 'failure'
+        if: ${{ !cancelled() && steps.build.outcome == 'failure' }}
         run: |
           echo 'Some mv2build targets failed; see build.log and diagnostic artifacts.' >&2
           exit 1

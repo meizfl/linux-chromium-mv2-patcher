@@ -239,6 +239,12 @@ and noted in the release; the workflow still reports failure for visibility.
 If no archives pass verification, no release is created. Diagnostic logs are
 retained as Actions artifacts for 14 days.
 
+Failures automatically create an Issue per failed target with its browser version
+(if resolved), error details, source commit, release date and Actions/log link.
+Repeated failures update the existing open automated Issue for that target.
+Setup, verification and publication errors also create a workflow-level Issue.
+Issues require the built-in token's `issues: write` permission, enabled in the workflow.
+
 Uploads are staged in a draft before publication. A same-day rerun can resume a
 draft; an already published dated release is left intact. The workflow uses the
 built-in `GITHUB_TOKEN` with `contents: write`; no personal token is required.
