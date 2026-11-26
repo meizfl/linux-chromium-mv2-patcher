@@ -223,6 +223,28 @@ when everything was already built). `--keep-work` preserves downloads/extracted
 files for diagnostics; `--work-dir /path` selects a filesystem with enough space.
 The output-directory lock prevents overlapping scheduled runs using that directory.
 
+### Daily GitHub releases
+
+[Daily MV2 release](.github/workflows/daily-release.yml) runs every day at
+03:17 UTC and can also be started from **Actions → Daily MV2 release → Run workflow**.
+Commit the workflow to the repository's default branch to activate its schedule.
+GitHub Actions schedules can be delayed; they are not an exact 24-hour timer.
+See [GitHub's scheduling documentation](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule).
+
+The release title and tag use the Tallinn calendar date in `DDMMYYYY` format,
+for example `25112026`. The job runs all default `mv2build` targets, without the
+opt-in universal variants. Releases contain verified archives, their JSON
+manifests, `SHA256SUMS`, and `build.log`. Unsupported/failed targets are omitted
+and noted in the release; the workflow still reports failure for visibility.
+If no archives pass verification, no release is created. Diagnostic logs are
+retained as Actions artifacts for 14 days.
+
+Uploads are staged in a draft before publication. A same-day rerun can resume a
+draft; an already published dated release is left intact. The workflow uses the
+built-in `GITHUB_TOKEN` with `contents: write`; no personal token is required.
+
+### Local systemd timer
+
 For an unattended run approximately every two days, use a systemd user timer.
 Replace the paths below with your absolute checkout and output paths. Do not use
 root: downloads and packaging do not require it.

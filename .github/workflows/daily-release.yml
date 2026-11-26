@@ -1,0 +1,123 @@
+name: Daily MV2 release
+
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-mv2-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 330
+    defaults:
+      run:
+        shell: bash
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Determine release date
+        id: date
+        run: echo "tag=$(TZ=Europe/Tallinn date +%d%m%Y)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes tar zstd p7zip-full libarchive-tools
+          python -m pip install -r requirements.txt
+
+      - name: Build and verify all default targets
+        id: build
+        continue-on-error: true
+        run: |
+          mkdir -p "$RUNNER_TEMP/mv2-release"
+          python mv2build.py --output "$RUNNER_TEMP/mv2-release" 2>&1 | tee "$RUNNER_TEMP/mv2-release/build.log"
+
+      - name: Preserve build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mv2-build-logs-${{ steps.date.outputs.tag }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/mv2-release/build.log
+            ${{ runner.temp }}/mv2-release/logs/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Prepare verified release assets
+        env:
+          OUTPUT: ${{ runner.temp }}/mv2-release
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          output = Path(os.environ['OUTPUT'])
+          checksums = []
+          for archive in sorted(output.glob('*.tar.zst')):
+              manifest = archive.with_name(archive.name + '.json')
+              data = json.loads(manifest.read_text())
+              with archive.open('rb') as source:
+                  checksum = hashlib.file_digest(source, 'sha256').hexdigest()
+              if data.get('patch_status') != 'patched' or data.get('archive_sha256') != checksum:
+                  raise SystemExit(f'Unverified archive: {archive.name}')
+              checksums.append(f'{checksum}  {archive.name}\n')
+          if not checksums:
+              raise SystemExit('No verified archives; no release will be published.')
+          (output / 'SHA256SUMS').write_text(''.join(checksums))
+          PY
+
+      - name: Publish dated release
+        env:
+          TAG: ${{ steps.date.outputs.tag }}
+          OUTPUT: ${{ runner.temp }}/mv2-release
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+        run: |
+          cd "$OUTPUT"
+          {
+            echo "Daily MV2 browser build: $TAG (Europe/Tallinn)."
+            echo
+            echo "Source commit: $GITHUB_SHA"
+            echo "Build: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo
+            echo 'Only successfully patched and verified browsers are attached.'
+            if [[ "$BUILD_OUTCOME" != success ]]; then
+              echo 'Some targets failed or are unsupported. See build.log for details.'
+            fi
+          } > "$RUNNER_TEMP/release-notes.md"
+          # Leave published releases intact on same-day reruns. A failed upload
+          # leaves a draft that a rerun can finish before publishing.
+          if gh release view "$TAG" --json isDraft > "$RUNNER_TEMP/release-state.json"; then
+            if python -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1]))["isDraft"] else 1)' "$RUNNER_TEMP/release-state.json"; then
+              echo 'Resuming draft release.'
+            else
+              echo "Release $TAG is already published; keeping its assets."
+              exit 0
+            fi
+          else
+            gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" \
+              --notes-file "$RUNNER_TEMP/release-notes.md" --draft
+          fi
+          gh release upload "$TAG" ./*.tar.zst ./*.tar.zst.json SHA256SUMS build.log --clobber
+          gh release edit "$TAG" --title "$TAG" --notes-file "$RUNNER_TEMP/release-notes.md" --draft=false --latest
+
+      - name: Report failed targets
+        if: steps.build.outcome == 'failure'
+        run: |
+          echo 'Some mv2build targets failed; see build.log and diagnostic artifacts.' >&2
+          exit 1
