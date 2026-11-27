@@ -121,7 +121,7 @@ jobs:
         if: ${{ !cancelled() && (failure() || steps.build.outcome == 'failure') }}
         env:
           RELEASE_TAG: ${{ steps.date.outputs.tag }}
-          WORKFLOW_FAILED: ${{ failure() }}
+          WORKFLOW_FAILED: ${{ job.status == 'failure' }}
         run: python .github/scripts/report-build-failures.py
 
       - name: Report failed targets
