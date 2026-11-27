@@ -226,7 +226,7 @@ The output-directory lock prevents overlapping scheduled runs using that directo
 ### Daily GitHub releases
 
 [Daily MV2 release](.github/workflows/daily-release.yml) runs every day at
-01:00 UTC (03:00 at fixed GMT+2) and can also be started from **Actions → Daily MV2 release → Run workflow**.
+01:15 UTC (03:15 at fixed GMT+2) and can also be started from **Actions → Daily MV2 release → Run workflow**.
 Commit the workflow to the repository's default branch to activate its schedule.
 GitHub Actions schedules can be delayed; they are not an exact 24-hour timer.
 See [GitHub's scheduling documentation](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule).
