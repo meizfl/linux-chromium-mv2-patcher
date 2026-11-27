@@ -662,6 +662,112 @@ def pure_impact_blocks(mm, segs, known_branches):
     return proofs
 
 
+def startup_helper_blocks(mm, segs, known_branches):
+    """Prove the SysV startup helper, independently of boolean/jump widths.
+
+    Keep its ABI/data flow explicit: the same extension is saved for the reason
+    call, both location exclusions return, and both unaffected types skip that
+    call. A byte test and a low-bit test of the saved bool are both accepted.
+    """
+    if capstone is None:
+        return []
+    decoder = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
+    decoder.detail = True
+
+    def executable(address):
+        return any(seg.off <= address < seg.off + seg.filesz for seg in segs)
+
+    def target(ins):
+        if len(ins.operands) == 1 and ins.operands[0].type == x86.X86_OP_IMM:
+            return ins.operands[0].imm
+        return None
+
+    def matches(block, expected):
+        return len(block) == len(expected) and all(
+            ins.mnemonic == mnemonic and (operands is None or ins.op_str == operands)
+            for ins, (mnemonic, operands) in zip(block, expected))
+
+    safe_ops = [('add', 'rsp, 0x30'), ('pop', 'rbx'), ('pop', 'r14'),
+                ('pop', 'rbp'), ('ret', '')]
+    action_ops = [
+        ('mov', 'r14d, edx'), ('call', None), ('mov', 'rbx, rax'),
+        ('mov', 'rdi, qword ptr [rbp - 0x18]'), ('call', None),
+        ('mov', 'rdi, rbx'), ('mov', 'rsi, rax'), ('mov', 'edx, 0x800000'),
+        ('call', None), ('test', None), ('je', None), ('test', 'al, al'),
+        ('jne', None), ('movzx', 'ebx, al'), ('add', 'ebx, 3'),
+        ('mov', 'rax, qword ptr [rbp - 0x18]'),
+        ('mov', 'rax, qword ptr [rax + 0x228]'), ('jmp', None)]
+    policy_ops = [
+        ('cmp', 'byte ptr [rsi + 0x208], 0'), ('jne', None),
+        ('mov', 'rdi, qword ptr [rdi]'),
+        ('mov', 'rax, qword ptr [rsi + 0x228]'),
+        ('mov', 'ecx, dword ptr [rax + 0x88]'), ('cmp', 'ecx, 8'),
+        ('je', None), ('cmp', 'ecx, 1'), ('jne', None),
+        ('mov', 'qword ptr [rbp - 0x18], rsi'),
+        ('mov', 'ecx, dword ptr [rax + 0x50]'), ('xor', 'ebx, ebx'),
+        ('cmp', 'ecx, 5'), ('je', None), ('cmp', 'ecx, 0xa'), ('jne', None)]
+    proofs = []
+    for seg in segs:
+        end = seg.off + seg.filesz
+        for off, compare in _comparisons(mm, seg, decoder):
+            branch = off + compare.size
+            if branch in known_branches or compare.op_str != 'dword ptr [rsi + 0x50], 2':
+                continue
+            # This helper owns the stack frame used throughout its proof.
+            prologue = bytes.fromhex('55 48 89 e5 41 56 53 48 83 ec 30')
+            if bytes(mm[max(seg.off, off - len(prologue)):off]) != prologue:
+                continue
+            for width in (2, 6):
+                current = bytes(mm[branch:branch + width])
+                patched = current == b'\x90' * width
+                gate = next(decoder.disasm(current, branch, count=1), None)
+                if not patched and (gate is None or gate.size != width or gate.mnemonic != 'je'):
+                    continue
+                block = list(decoder.disasm(bytes(mm[branch + width:min(end, branch + 512)]), branch + width))
+                safe, action = block[:5], block[5:23]
+                if not matches(safe, safe_ops) or not matches(action, action_ops):
+                    continue
+                if action[9].op_str not in ('r14b, r14b', 'r14b, 1'):
+                    continue
+                if not all(executable(target(action[i]) or -1) for i in (1, 4, 8)):
+                    continue
+                if target(action[10]) != action[13].address:
+                    continue
+                trap = target(action[12])
+                if trap is None or not executable(trap) or bytes(mm[trap:trap + 3]) != b'\xcc\x0f\x0b':
+                    continue
+                candidates = []
+                for i in range(23, len(block) - 15):
+                    policy = block[i:i + 16]
+                    if not matches(policy, policy_ops):
+                        continue
+                    safe_address = safe[0].address
+                    unaffected = policy[-1].address + policy[-1].size
+                    if (target(policy[1]) != safe_address or target(policy[8]) != safe_address or
+                            target(policy[6]) != policy[9].address or
+                            target(policy[13]) != unaffected or target(action[-1]) != unaffected or
+                            target(policy[-1]) != action[0].address):
+                        continue
+                    if not patched and target(gate) != policy[0].address:
+                        continue
+                    candidates.append(policy)
+                if len(candidates) != 1:
+                    continue
+                policy = candidates[0]
+                displacement = policy[0].address - branch - width
+                if width == 2 and not -128 <= displacement <= 127:
+                    continue
+                original = ((b'\x74' + struct.pack('b', displacement)) if width == 2 else
+                            b'\x0f\x84' + struct.pack('<i', displacement))
+                finish = policy[-1].address + policy[-1].size
+                proofs.append(BlockProof(branch, off - len(prologue), policy[0].address,
+                                         finish, safe[0].address, original, b'\x90' * width,
+                                         'patched' if patched else 'original',
+                                         ((off - len(prologue), action[-1].address + action[-1].size),
+                                          (policy[0].address, finish))))
+    return proofs
+
+
 def startup_collection_blocks(mm, segs, known_branches, decode_jump, fmt="PE"):
     """Prove a collection gate from policy edges and both iterator advances.
 

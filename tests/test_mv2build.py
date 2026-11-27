@@ -78,16 +78,17 @@ class BuilderTests(unittest.TestCase):
     def test_arch_compares_versions_not_dates_and_uses_matching_checksum(self):
         stable = dict(epoch=0, pkgver='156.0.8078.79', pkgrel='9', filename='stable.pkg.tar.zst', repo='extra')
         testing = dict(epoch=0, pkgver='157.0.8100.1', pkgrel='1', filename='testing.pkg.tar.zst', repo='extra-testing')
-        database = io.BytesIO()
-        desc = ('%FILENAME%\ntesting.pkg.tar.zst\n\n%SHA256SUM%\n' + 'a' * 64 + '\n').encode()
-        with tarfile.open(fileobj=database, mode='w:gz') as tar:
-            member = tarfile.TarInfo('chromium-157/desc')
-            member.size = len(desc)
-            tar.addfile(member, io.BytesIO(desc))
         def metadata(url):
-            if url.endswith('.db'):
-                return database.getvalue()
-            return json.dumps(testing if '/extra-testing/' in url else stable).encode()
+            self.assertTrue(url.endswith('.db'))
+            info = testing if '/extra-testing/' in url else stable
+            desc = (f"%NAME%\nchromium\n\n%VERSION%\n{info['pkgver']}-{info['pkgrel']}\n\n"
+                    f"%FILENAME%\n{info['filename']}\n\n%SHA256SUM%\n" + 'a' * 64 + '\n').encode()
+            database = io.BytesIO()
+            with tarfile.open(fileobj=database, mode='w:gz') as tar:
+                member = tarfile.TarInfo(f"chromium-{info['pkgver']}/desc")
+                member.size = len(desc)
+                tar.addfile(member, io.BytesIO(desc))
+            return database.getvalue()
         with patch.object(builder, 'metadata', side_effect=metadata):
             release = builder.resolve('chromium-arch')
         self.assertIn('/extra-testing/', release.url)

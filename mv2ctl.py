@@ -37,7 +37,7 @@ import tempfile
 
 from mv2flow import (install_blocks, profile_matches, unique_sites, audit_unclassified,
                      locale_pack_for, manifest_resource_ids, reenable_blocks, unclassified_install_messages, inline_windows_install, shared_policy_entries,
-                     pure_impact_blocks, startup_collection_blocks, profile_gaps)
+                     pure_impact_blocks, startup_collection_blocks, startup_helper_blocks, profile_gaps)
 
 from mv2profiles import (
     R160_INLINE_WIN_ERROR,
@@ -911,6 +911,12 @@ def find_sites(mm, segs, resource_ids=None):
                 sites.append(Site(kind, proof.entry, proof.end, proof.branch,
                                   proof.original, proof.replacement, proof.state, label,
                                   evidence=proof.evidence))
+    if fmt == "ELF":
+        for proof in startup_helper_blocks(mm, segs, {site.jpos for site in sites}):
+            sites.append(Site("N3", proof.entry, proof.end, proof.branch,
+                              proof.original, proof.replacement, proof.state,
+                              "decoded startup helper: verified reason call and unaffected exits",
+                              evidence=proof.evidence))
     inline_messages = set()
     inline_family = fmt == "PE" and {'A', 'N2', 'N3', 'N6'} <= {site.kind for site in sites}
     if inline_family:

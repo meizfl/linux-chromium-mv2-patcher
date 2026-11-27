@@ -165,39 +165,41 @@ def resolve(target):
         return Release(target, version, url, 'exe', f'chrome-win64-{version}-{channel}.tar.zst',
                        package.attrib['hash_sha256'])
     if target == 'chromium-arch':
+        # Resolve the entire release from one mirror database snapshot. The
+        # package website/API can be ahead of or behind this mirror during sync.
         candidates = []
         for repo in ('extra', 'extra-testing'):
+            base = f'https://geo.mirror.pkgbuild.com/{repo}/os/x86_64/'
             try:
-                info = json.loads(metadata(f'https://archlinux.org/packages/{repo}/x86_64/chromium/json/'))
+                database = metadata(base + repo + '.db')
             except urllib.error.HTTPError as error:
                 if error.code == 404:
                     continue
                 raise
-            candidates.append(info)
+            with tarfile.open(fileobj=io.BytesIO(database), mode='r:*') as archive:
+                for member in archive:
+                    if not (member.isfile() and member.name.startswith('chromium-')
+                            and member.name.endswith('/desc')):
+                        continue
+                    text = archive.extractfile(member).read().decode()
+                    fields = dict(re.findall(r'^%([A-Z0-9_]+)%\n([^\n]+)', text, re.M))
+                    if fields.get('NAME') != 'chromium':
+                        continue
+                    filename = safe_name(fields.get('FILENAME', ''))
+                    raw_version = fields.get('VERSION', '')
+                    match = re.fullmatch(r'(?:(\d+):)?(\d+(?:\.\d+)*)-(\d+(?:\.\d+)*)', raw_version)
+                    checksum = fields.get('SHA256SUM', '')
+                    if not match or not re.fullmatch(r'[a-f0-9]{64}', checksum):
+                        raise BuildError(f'Invalid Chromium version/checksum in {repo}.db')
+                    epoch, pkgver, pkgrel = match.groups()
+                    version = safe_name(f'{pkgver}-{pkgrel}')
+                    key = (int(epoch or 0), tuple(map(int, pkgver.split('.'))),
+                           tuple(map(int, pkgrel.split('.'))))
+                    candidates.append((key, Release(target, version, base + filename,
+                                                    'arch', filename, checksum)))
         if not candidates:
-            raise BuildError('Chromium absent from both Arch repositories')
-        # Chromium pkgver is numeric; compare epoch, all version components and pkgrel.
-        def version_key(info):
-            return (int(info['epoch']), tuple(int(n) for n in info['pkgver'].split('.')),
-                    tuple(int(n) for n in str(info['pkgrel']).split('.')))
-        info = max(candidates, key=version_key)
-        filename = safe_name(info['filename'])
-        version = safe_name(f"{info['pkgver']}-{info['pkgrel']}")
-        repo = info['repo']
-        database = metadata(f'https://geo.mirror.pkgbuild.com/{repo}/os/x86_64/{repo}.db')
-        checksum = ''
-        with tarfile.open(fileobj=io.BytesIO(database), mode='r:*') as archive:
-            for member in archive:
-                if member.name.startswith('chromium-') and member.name.endswith('/desc'):
-                    fields = archive.extractfile(member).read().decode()
-                    if f'%FILENAME%\n{filename}\n' in fields:
-                        checksum = re.search(r'%SHA256SUM%\n([a-f0-9]{64})\n', fields)[1]
-                        break
-        if not checksum:
-            raise BuildError('Arch mirror and package API disagree; retry after mirror synchronization')
-        return Release(target, version,
-                       f"https://geo.mirror.pkgbuild.com/{repo}/os/x86_64/{filename}",
-                       'arch', filename, checksum)
+            raise BuildError('Chromium absent from both Arch mirror databases')
+        return max(candidates, key=lambda candidate: candidate[0])[1]
     if target == 'chromium-snapshot-linux':
         revision = metadata(SNAPSHOTS + 'LAST_CHANGE').decode().strip()
         if not revision.isdigit():
