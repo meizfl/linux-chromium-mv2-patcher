@@ -2,7 +2,7 @@ name: Daily MV2 release
 
 on:
   schedule:
-    - cron: '15 1 * * *'
+    - cron: '45 1 * * *'
   workflow_dispatch:
 
 permissions:
